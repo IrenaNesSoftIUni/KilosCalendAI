@@ -52,6 +52,15 @@ button{font:inherit;color:inherit}
 .profile-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;margin-bottom:4px}
 .profile-tab{background:transparent;border:1px solid var(--line);border-radius:999px;padding:6px 14px;cursor:pointer;font-size:.82rem;color:var(--ink2)}
 .profile-tab[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.profile-tab[data-profile="mirko"][aria-selected="true"]{background:#0E6A73;border-color:#0E6A73;color:#FFFFFF}
+.account{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.account h2{margin:0}
+.account-form{display:grid;gap:10px}
+.account-form[hidden]{display:none}
+.account-buttons{display:flex;flex-wrap:wrap;gap:8px}
+.account-message{min-height:1.4em;font-size:.88rem}
+.account-message.err{color:var(--bad)}
+.account-message.ok{color:var(--good)}
 
 .wrap{max-width:1040px;margin:0 auto;display:grid;gap:32px 44px;
   grid-template-columns:minmax(0,1fr);
@@ -168,6 +177,25 @@ input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline
       <h1>Мерки и килограми</h1>
     </div>
     <div class="meta" id="meta"></div>
+    <section class="account" aria-labelledby="accountTitle">
+      <h2 id="accountTitle">Синхронизирай измерванията</h2>
+      <p class="muted" id="accountStatus" role="status" aria-live="polite">Проверка на акаунта…</p>
+      <form class="account-form" id="authForm" novalidate>
+        <div class="grid6">
+          <div class="f s3"><label for="authEmail">Имейл</label><input id="authEmail" type="email" autocomplete="email" maxlength="254" required></div>
+          <div class="f s3"><label for="authPassword">Парола</label><input id="authPassword" type="password" autocomplete="current-password" minlength="12" maxlength="72" required></div>
+        </div>
+        <p class="muted">Паролата трябва да е поне 12 символа. При вход локалните и сървърните записи се обединяват.</p>
+        <div class="account-buttons">
+          <button class="btn" type="submit" data-auth-action="login">Вход</button>
+          <button class="btn alt" type="submit" data-auth-action="register">Регистрация</button>
+        </div>
+      </form>
+      <div class="account-buttons" id="accountActions" hidden>
+        <button class="btn alt" type="button" id="logoutBtn">Изход</button>
+      </div>
+      <p class="account-message" id="accountMessage" role="status" aria-live="polite"></p>
+    </section>
     <div id="demoBar" class="demo" hidden><span>Примерни данни. Нищо от това не е запазено.</span><button class="lnk" type="button" data-act="exitdemo">Започни със собствени</button></div>
   </header>
 
@@ -270,7 +298,8 @@ var S=stateProfiles[activeProfile];
 var dirty={s:false,g:false};
 function all(D){return D.start?[Object.assign({s:1},D.start)].concat(D.entries):D.entries}
 var demo=false, loaded=false, tab='w', editing=null, delKey=null;
-var mode='local', ref=null, saving=Promise.resolve(), pending=0;
+var mode='local', currentUser=null, saving=Promise.resolve(), pending=0;
+var authInitializing=true, authBusy=false, authError='', syncError='', localError='';
 
 function makeEmptyProfile(){return {goal:{weight:null,date:null},start:null,entries:[]}}
 function profileLabel(key){return key==='mirko'?'Мирко':'Ирка'}
@@ -330,44 +359,116 @@ function persistProfiles(){
   PROFILE_KEYS.forEach(function(key){out.profiles[key]=payloadForState(stateProfiles[key]||makeEmptyProfile())});
   return out;
 }
-function lsWrite(){try{localStorage.setItem(LS,JSON.stringify(persistProfiles()))}catch(e){}}
-function lsRead(){try{var r=localStorage.getItem(LS);return r?JSON.parse(r):null}catch(e){return null}}
+function accountStorageKey(email){return LS+':account:'+encodeURIComponent(email.toLowerCase())}
+function lsWrite(key,data){
+  try{localStorage.setItem(key,JSON.stringify(data));localError='';return true}
+  catch(error){console.error('Неуспешен локален запис:',error);localError='Локалното копие не можа да бъде записано в този браузър.';return false}
+}
+function lsRead(key){
+  try{var r=localStorage.getItem(key);return r?JSON.parse(r):null}
+  catch(error){console.error('Неуспешно прочитане на локалните данни:',error);localError='Локалните данни не можаха да бъдат прочетени.';return null}
+}
+function trackerData(raw){
+  var profiles=raw&&raw.profiles&&typeof raw.profiles==='object'?raw.profiles:{};
+  return {v:1,activeProfile:raw&&PROFILE_KEYS.indexOf(raw.activeProfile)!==-1?raw.activeProfile:'irka',
+    profiles:{irka:payloadForState(normalizeProfile(profiles.irka||(raw&&raw.goal!==undefined?raw:null))),
+      mirko:payloadForState(normalizeProfile(profiles.mirko))}};
+}
+function mergeTrackerData(localData,accountData){
+  var local=trackerData(localData),account=trackerData(accountData),merged={v:1,activeProfile:accountData?account.activeProfile:local.activeProfile,profiles:{}};
+  PROFILE_KEYS.forEach(function(key){
+    var localProfile=local.profiles[key],accountProfile=account.profiles[key],entries={};
+    localProfile.entries.forEach(function(entry){entries[entry.d]=Object.assign({},entry)});
+    accountProfile.entries.forEach(function(entry){entries[entry.d]=Object.assign({},entry)});
+    merged.profiles[key]={
+      goal:{weight:accountProfile.goal.weight!=null?accountProfile.goal.weight:localProfile.goal.weight,
+        date:accountProfile.goal.date||localProfile.goal.date},
+      start:accountProfile.start?Object.assign({},accountProfile.start):localProfile.start?Object.assign({},localProfile.start):null,
+      entries:Object.keys(entries).sort().map(function(date){return entries[date]})
+    };
+  });
+  return merged;
+}
+async function apiRequest(url,options){
+  options=options||{};
+  options.credentials='same-origin';
+  options.headers=Object.assign({},options.headers||{});
+  if(options.body)options.headers['Content-Type']='application/json';
+  var response=await fetch(url,options),result;
+  try{result=await response.json()}catch(error){throw new Error('Сървърът върна невалиден отговор.')}
+  if(!response.ok)throw new Error(result&&result.error?result.error:'Заявката не беше успешна.');
+  return result;
+}
 function persist(){
   stateProfiles[activeProfile]=normalizeProfile(S);
-  if(mode==='cloud'&&ref){
-    var body=payload();pending++;
-    saving=saving.then(function(){return ref.set(body)}).catch(function(err){
-      console.warn(err);mode='local';lsWrite();renderNote();
-    }).then(function(){pending--});
-  }else lsWrite();
+  var data=persistProfiles(),storageKey=currentUser?accountStorageKey(currentUser.email):LS;
+  lsWrite(storageKey,data);
+  if(mode==='cloud'&&currentUser){
+    pending++;syncError='';renderNote();
+    saving=saving.then(async function(){
+      await apiRequest('/api/data',{method:'PUT',body:JSON.stringify(data)});
+    }).catch(function(error){
+      console.error('Неуспешна синхронизация:',error);syncError=error.message;renderNote();
+    }).then(function(){pending--;renderNote()});
+  }
 }
 function renderNote(){
-  $('storeNote').textContent=!loaded?'':mode==='cloud'
-    ?'Записите се пазят в профила ти и ги виждаш само ти, от всяко устройство.'
-    :'Записите се пазят само в този браузър. Ако изчистиш данните му, ще се изгубят.';
+  $('storeNote').textContent=!loaded?'':localError||syncError||(
+    mode==='cloud'?(pending?'Синхронизиране с акаунта…':'Записите се пазят в профила ти и са достъпни от всяко устройство.')
+      :'Записите се пазят само в този браузър. Влез или се регистрирай, за да ги синхронизираш.');
 }
-function startLocal(){mode='local';restoreProfiles(lsRead());loaded=true;renderAll()}
-function init(){
+function renderAccount(){
+  $('accountStatus').textContent=authInitializing?'Проверка на акаунта…':currentUser
+    ?'Влязъл си като '+currentUser.email+'. '+(mode==='cloud'?'Данните се синхронизират с акаунта ти.':'Синхронизацията временно не е налична.')
+    :'Използваш приложението като гост. Данните се пазят локално в този браузър.';
+  $('authForm').hidden=authInitializing||!!currentUser;
+  $('accountActions').hidden=authInitializing||!currentUser;
+  $('authForm').querySelectorAll('button').forEach(function(button){button.disabled=authBusy});
+  $('logoutBtn').disabled=authBusy;
+  var message=$('accountMessage');
+  message.textContent=authError;
+  message.className='account-message'+(authError?' err':'');
+}
+function startLocal(message){
+  currentUser=null;mode='local';restoreProfiles(lsRead(LS));loaded=true;
+  authInitializing=false;authError=message||'';renderAll();
+}
+function startAccountFallback(user,error){
+  currentUser=user;mode='local';
+  restoreProfiles(mergeTrackerData(lsRead(LS),lsRead(accountStorageKey(user.email))));
+  loaded=true;authInitializing=false;authError='Входът е успешен, но синхронизацията временно не е налична: '+error.message;
+  syncError=error.message;renderAll();
+}
+async function activateAccount(user){
+  currentUser=user;mode='cloud';
+  var key=accountStorageKey(user.email),guestData=lsRead(LS),cachedData=lsRead(key);
+  var localData=mergeTrackerData(guestData,cachedData);
+  var response=await apiRequest('/api/data'),remoteData=response.data;
+  var mergedData=mergeTrackerData(localData,remoteData);
+  restoreProfiles(mergedData);loaded=true;
+  lsWrite(key,mergedData);
+  if(remoteData&&JSON.stringify(trackerData(remoteData))!==JSON.stringify(mergedData)){
+    await apiRequest('/api/data',{method:'PUT',body:JSON.stringify(mergedData)});
+  }else if(!remoteData&&(guestData||cachedData)){
+    await apiRequest('/api/data',{method:'PUT',body:JSON.stringify(mergedData)});
+  }
+  if(guestData){
+    try{localStorage.removeItem(LS)}catch(error){console.error('Неуспешно изчистване на копието за гост:',error)}
+  }
+  syncError='';
+}
+async function init(){
   renderAll();
-  var done=false;
-  var timer=setTimeout(function(){if(!done){done=true;startLocal()}},3500);
-  (async function(){
-    try{
-      var c=window.claude;
-      if(!c||!c.use)throw 0;
-      var parts=await Promise.all([c.use('db'),c.use('user')]);
-      var db=parts[0],user=parts[1];
-      var id=user?await user.id():null;
-      if(done)return;
-      if(!db||!id)throw 0;
-      done=true;clearTimeout(timer);
-      ref=db.doc('data/users/'+id+'/tracker');mode='cloud';
-      ref.onSnapshot(function(snap){
-        if(pending>0||(snap.metadata&&snap.metadata.hasPendingWrites))return;
-        applyDoc(snap.exists?snap.data():null);loaded=true;renderAll();
-      },function(err){console.warn(err);mode='local';startLocal()});
-    }catch(e){if(!done){done=true;clearTimeout(timer);startLocal()}}
-  })();
+  try{
+    var session=await apiRequest('/api/auth/session');
+    if(session.user){
+      try{await activateAccount(session.user);renderAll()}
+      catch(error){console.error('Неуспешно зареждане на акаунта:',error);startAccountFallback(session.user,error)}
+    }else startLocal();
+  }catch(error){
+    console.error('Неуспешна проверка на сесията:',error);
+    startLocal('Връзката със сървъра не е налична. Данните се показват от този браузър.');
+  }
 }
 
 /* ---------- render ---------- */
@@ -518,15 +619,49 @@ function renderForm(){
 function renderAll(){
   $('demoBar').hidden=!demo;
   syncProfileTabs();
-  renderHead();renderProgress();renderChart();renderTable();renderForm();renderNote();
+  renderHead();renderProgress();renderChart();renderTable();renderForm();renderNote();renderAccount();
 }
 
 /* ---------- actions ---------- */
 function setMsg(id,text,cls){var m=$(id);m.textContent=text;m.className='msg'+(cls?' '+cls:'')}
+function setAuthError(text){authError=text||'';renderAccount()}
 function resetEntryForm(){
   ['f-w','f-c','f-wa','f-h','f-n'].forEach(function(id){$(id).value=''});
   $('f-date').value=ds(today());editing=null;
 }
+
+$('authForm').addEventListener('submit',async function(ev){
+  ev.preventDefault();
+  if(authBusy)return;
+  if(!this.checkValidity()){this.reportValidity();return}
+  var action=ev.submitter&&ev.submitter.dataset.authAction;
+  if(action!=='login'&&action!=='register')return;
+  authBusy=true;authError='';renderAccount();
+  try{
+    var result=await apiRequest('/api/auth/'+action,{method:'POST',body:JSON.stringify({
+      email:$('authEmail').value,password:$('authPassword').value
+    })});
+    await activateAccount(result.user);
+    $('authForm').reset();authError='';renderAll();
+  }catch(error){
+    console.error('Неуспешно удостоверяване или синхронизиране:',error);
+    if(currentUser){
+      $('authForm').reset();startAccountFallback(currentUser,error);
+    }else startLocal(error.message);
+  }finally{authBusy=false;renderAccount()}
+});
+
+$('logoutBtn').addEventListener('click',async function(){
+  if(authBusy)return;
+  authBusy=true;authError='';renderAccount();
+  try{
+    await saving;
+    await apiRequest('/api/auth/logout',{method:'POST'});
+    startLocal();
+  }catch(error){
+    console.error('Неуспешен изход:',error);setAuthError(error.message);
+  }finally{authBusy=false;renderAccount()}
+});
 
 $('f-entry').addEventListener('submit',function(ev){
   ev.preventDefault();
