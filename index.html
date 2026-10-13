@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html{color-scheme:light}body{margin:0}[hidden]{display:none!important}</style>
+<title>Мерки и килограми</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600&family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: open dashboard on the left (progress tape, chart, history), one card on the right for the weekly check-in. The yellow tailor's tape is the single bold element. */
+:root{
+  --bg:#F1F5F2; --surface:#FFFFFF; --field:#F1F5F2;
+  --ink:#12231D; --ink2:#4A5E56; --line:#D1DCD6;
+  --accent:#B83272; --on-accent:#FFFFFF;
+  --tape:#F2C230; --tick:rgba(18,35,29,.7); --tick-fill:rgba(255,255,255,.55);
+  --goal:#9A7000; --area:rgba(184,50,114,.12);
+  --good:#2A7A3B; --bad:#B23A2B;
+  --f-display:'Unbounded',system-ui,sans-serif;
+  --f-body:'Onest',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1713; --surface:#16221D; --field:#0E1713;
+    --ink:#E6EFEA; --ink2:#9CB0A7; --line:#28382F;
+    --accent:#F08CB8; --on-accent:#2B0B1B;
+    --tape:#E2B52B; --tick:rgba(14,23,19,.7); --tick-fill:rgba(43,11,27,.55);
+    --goal:#E2B52B; --area:rgba(240,140,184,.16);
+    --good:#6FCB7E; --bad:#F18B79;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1713; --surface:#16221D; --field:#0E1713;
+  --ink:#E6EFEA; --ink2:#9CB0A7; --line:#28382F;
+  --accent:#F08CB8; --on-accent:#2B0B1B;
+  --tape:#E2B52B; --tick:rgba(14,23,19,.7); --tick-fill:rgba(43,11,27,.55);
+  --goal:#E2B52B; --area:rgba(240,140,184,.16);
+  --good:#6FCB7E; --bad:#F18B79;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 var(--f-body);padding-inline:16px;padding-block:28px 64px}
+h1,h2{font-family:var(--f-display);font-weight:500;margin:0;text-wrap:balance}
+h1{font-size:clamp(1.55rem,4.5vw,2.2rem);line-height:1.15;letter-spacing:-.01em}
+h2{font-size:1rem;line-height:1.3}
+p{margin:0}
+button{font:inherit;color:inherit}
+.muted{color:var(--ink2)}
+.mono,.eyebrow,.lab,th,.pill,.unit,label{font-family:var(--f-mono)}
+.eyebrow{font-size:.75rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink2);margin-bottom:8px}
+.profile-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;margin-bottom:4px}
+.profile-tab{background:transparent;border:1px solid var(--line);border-radius:999px;padding:6px 14px;cursor:pointer;font-size:.82rem;color:var(--ink2)}
+.profile-tab[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+
+.wrap{max-width:1040px;margin:0 auto;display:grid;gap:32px 44px;
+  grid-template-columns:minmax(0,1fr);
+  grid-template-areas:"head" "prog" "side" "chart" "hist"}
+.head{grid-area:head;display:grid;gap:14px;min-width:0}
+.prog{grid-area:prog;min-width:0}
+.side{grid-area:side;display:grid;gap:16px;min-width:0}
+.chart{grid-area:chart;min-width:0}
+.hist{grid-area:hist;min-width:0}
+@media (min-width:920px){
+  .wrap{grid-template-columns:minmax(0,1fr) 340px;
+    grid-template-areas:"head head" "prog side" "chart side" "hist hist";align-items:start}
+}
+
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.pill{display:inline-flex;align-items:center;font-size:.75rem;letter-spacing:.04em;padding:5px 11px;border-radius:999px;border:1px solid var(--line);color:var(--ink2)}
+.pill.due{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.demo{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:10px 14px;border-radius:8px;background:var(--tape);color:#12231D;font-size:.9rem}
+.demo[hidden]{display:none!important}
+.demo .lnk{color:#12231D;font-weight:600}
+
+/* progress */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:12px 20px}
+.tile{border-top:1px solid var(--line);padding-top:10px;min-width:0}
+.lab{font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink2)}
+.big{font-family:var(--f-display);font-weight:500;font-size:clamp(1.45rem,5.2vw,2.3rem);line-height:1.15;font-variant-numeric:tabular-nums;margin-top:4px;overflow-wrap:anywhere}
+.big small{font:500 .8rem var(--f-body);color:var(--ink2);margin-left:4px}
+.sub{font-size:.82rem;color:var(--ink2);margin-top:2px}
+.tapewrap{position:relative;padding-top:32px;margin-block:26px 6px}
+.tape{position:relative;height:40px;border-radius:6px;overflow:hidden;
+  background:
+    linear-gradient(90deg,var(--tick) 1.5px,transparent 1.5px) 0 100%/40px 55% repeat-x,
+    linear-gradient(90deg,var(--tick) 1px,transparent 1px) 0 100%/8px 30% repeat-x,
+    var(--tape)}
+.tape-fill{position:absolute;inset:0 auto 0 0;transition:width .6s ease;
+  background:
+    linear-gradient(90deg,var(--tick-fill) 1.5px,transparent 1.5px) 0 100%/40px 55% repeat-x,
+    linear-gradient(90deg,var(--tick-fill) 1px,transparent 1px) 0 100%/8px 30% repeat-x,
+    var(--accent)}
+.pin{position:absolute;top:0;transform:translateX(-50%);background:var(--ink);color:var(--bg);font:600 .75rem var(--f-mono);padding:3px 8px;border-radius:4px;white-space:nowrap}
+.pin::after{content:"";position:absolute;left:50%;top:100%;margin-left:-5px;border:5px solid transparent;border-top-color:var(--ink)}
+.tape-labels{display:flex;justify-content:space-between;gap:12px;font:.72rem var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);margin-bottom:18px}
+.pace{color:var(--ink2);font-size:.9rem;margin-block:4px 18px;display:grid;gap:2px}
+.measures{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:12px 20px}
+.mv{font:500 1.1rem var(--f-mono);font-variant-numeric:tabular-nums;margin-top:4px}
+.dl{font:.8rem var(--f-mono);margin-top:2px}
+.good{color:var(--good)} .bad{color:var(--bad)}
+.hero-empty{display:grid;gap:14px;justify-items:start}
+.hero-empty .tape{width:100%}
+.hero-empty p{max-width:52ch}
+
+/* chart */
+.sec-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;border-top:1px solid var(--line);padding-top:14px;margin-bottom:12px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px}
+.tab{background:transparent;border:1px solid var(--line);border-radius:999px;padding:5px 13px;cursor:pointer;font-size:.85rem}
+.tab[aria-selected="true"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+#chartBox{width:100%;min-height:200px}
+#chartBox svg{display:block;width:100%;height:auto;overflow:visible}
+.g-line{stroke:var(--line);stroke-width:1;fill:none}
+.g-t{fill:var(--ink2);font:11px var(--f-mono)}
+.g-goal{stroke:var(--goal);stroke-width:1.5;stroke-dasharray:5 4;fill:none}
+.g-goalt{fill:var(--goal);font:600 11px var(--f-mono)}
+.g-path{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+.g-area{fill:var(--area);stroke:none}
+.g-dot{fill:var(--bg);stroke:var(--accent);stroke-width:2}
+.g-last{fill:var(--accent);stroke:var(--bg);stroke-width:2}
+.g-val{fill:var(--ink);font:600 12px var(--f-mono)}
+
+/* history */
+.tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;width:100%;min-width:600px;font-variant-numeric:tabular-nums}
+th{font-size:.7rem;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);text-align:left;padding:8px 12px;border-bottom:1px solid var(--ink)}
+td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+td.num{font-family:var(--f-mono);font-size:.95rem;white-space:nowrap}
+td.wk{font-family:var(--f-mono);color:var(--ink2);font-size:.85rem;white-space:nowrap}
+.d{display:block;font-size:.75rem}
+.note{display:block;font-size:.8rem;color:var(--ink2);margin-top:2px;max-width:24ch;overflow-wrap:anywhere}
+td.act{white-space:nowrap;text-align:right}
+.lnk{background:none;border:0;padding:4px 6px;cursor:pointer;text-decoration:underline;text-underline-offset:3px;color:var(--accent);font-size:.85rem}
+.lnk.bad{color:var(--bad)}
+
+/* forms */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;display:grid;gap:14px}
+.panel p.hint{font-size:.85rem;color:var(--ink2);margin-top:-6px}
+.grid6{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px 10px}
+.s2{grid-column:span 2}.s3{grid-column:span 3}.s6{grid-column:span 6}
+.f{display:grid;gap:5px;min-width:0}
+label{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2)}
+.opt{text-transform:none;letter-spacing:0;opacity:.8}
+.fld{position:relative;min-width:0}
+input{width:100%;min-width:0;height:44px;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--ink);font:16px var(--f-body);padding:0 12px}
+.fld input{padding-right:34px;font-family:var(--f-mono)}
+.unit{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:.75rem;color:var(--ink2);pointer-events:none}
+input::placeholder{color:var(--ink2);opacity:.6}
+input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{height:44px;padding:0 18px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--on-accent);font-weight:600;cursor:pointer}
+.btn.alt{background:transparent;color:var(--accent)}
+.btn:hover{filter:brightness(1.08)}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.msg{min-height:1.4em;font-size:.88rem}
+.msg.err{color:var(--bad)} .msg.ok{color:var(--good)}
+.storenote{font-size:.8rem;color:var(--ink2);padding-inline:4px}
+@media (prefers-reduced-motion:reduce){.tape-fill{transition:none}}
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <div>
+      <div class="profile-tabs" role="tablist" aria-label="Профил">
+        <button class="profile-tab" type="button" role="tab" aria-selected="true" data-profile="irka">Ирка</button>
+        <button class="profile-tab" type="button" role="tab" aria-selected="false" data-profile="mirko">Мирко</button>
+      </div>
+      <p class="eyebrow">Седмичен дневник</p>
+      <h1>Мерки и килограми</h1>
+    </div>
+    <div class="meta" id="meta"></div>
+    <div id="demoBar" class="demo" hidden><span>Примерни данни. Нищо от това не е запазено.</span><button class="lnk" type="button" data-act="exitdemo">Започни със собствени</button></div>
+  </header>
+
+  <section class="prog" id="prog" aria-live="polite"></section>
+
+  <aside class="side">
+    <form id="f-entry" class="panel" novalidate autocomplete="off">
+      <h2 id="formTitle">Седмично отчитане</h2>
+      <p class="hint">Мери се в един и същи ден и час всяка седмица.</p>
+      <div class="grid6">
+        <div class="f s3"><label for="f-date">Дата</label><input id="f-date" type="date"></div>
+        <div class="f s3"><label for="f-w">Тегло</label><div class="fld"><input id="f-w" type="text" inputmode="decimal" placeholder="72,4"><span class="unit">кг</span></div></div>
+        <div class="f s2"><label for="f-c">Гръдна</label><div class="fld"><input id="f-c" type="text" inputmode="decimal" placeholder="95"><span class="unit">см</span></div></div>
+        <div class="f s2"><label for="f-wa">Талия</label><div class="fld"><input id="f-wa" type="text" inputmode="decimal" placeholder="78"><span class="unit">см</span></div></div>
+        <div class="f s2"><label for="f-h">Ханш</label><div class="fld"><input id="f-h" type="text" inputmode="decimal" placeholder="102"><span class="unit">см</span></div></div>
+        <div class="f s6"><label for="f-n">Бележка <span class="opt">по желание</span></label><input id="f-n" type="text" maxlength="200" placeholder="Как мина седмицата?"></div>
+      </div>
+      <p class="msg" id="msg" role="status"></p>
+      <div class="row">
+        <button class="btn" type="submit" id="saveBtn">Запази отчитането</button>
+        <button class="lnk" type="button" id="cancelEdit" hidden>Отказ</button>
+      </div>
+    </form>
+
+    <form id="f-start" class="panel" novalidate autocomplete="off">
+      <h2>Начало</h2>
+      <p class="hint">Началните килограми и мерки, от които се мери напредъкът.</p>
+      <div class="grid6">
+        <div class="f s3"><label for="s-date">Дата</label><input id="s-date" type="date"></div>
+        <div class="f s3"><label for="s-w">Тегло</label><div class="fld"><input id="s-w" type="text" inputmode="decimal" placeholder="84,6"><span class="unit">кг</span></div></div>
+        <div class="f s2"><label for="s-c">Гръдна</label><div class="fld"><input id="s-c" type="text" inputmode="decimal" placeholder="103"><span class="unit">см</span></div></div>
+        <div class="f s2"><label for="s-wa">Талия</label><div class="fld"><input id="s-wa" type="text" inputmode="decimal" placeholder="92"><span class="unit">см</span></div></div>
+        <div class="f s2"><label for="s-h">Ханш</label><div class="fld"><input id="s-h" type="text" inputmode="decimal" placeholder="108"><span class="unit">см</span></div></div>
+      </div>
+      <p class="msg" id="smsg" role="status"></p>
+      <div class="row"><button class="btn alt" type="submit">Запази началото</button></div>
+    </form>
+
+    <form id="f-goal" class="panel" novalidate autocomplete="off">
+      <h2>Цел</h2>
+      <div class="grid6">
+        <div class="f s3"><label for="g-w">Целево тегло</label><div class="fld"><input id="g-w" type="text" inputmode="decimal" placeholder="68"><span class="unit">кг</span></div></div>
+        <div class="f s3"><label for="g-d">До дата <span class="opt">по желание</span></label><input id="g-d" type="date"></div>
+      </div>
+      <p class="msg" id="gmsg" role="status"></p>
+      <div class="row"><button class="btn alt" type="submit">Запази целта</button></div>
+    </form>
+    <p class="storenote" id="storeNote"></p>
+  </aside>
+
+  <section class="chart">
+    <div class="sec-head">
+      <h2>Динамика</h2>
+      <div class="tabs" role="tablist" aria-label="Показател">
+        <button class="tab" role="tab" data-tab="w" type="button">Тегло</button>
+        <button class="tab" role="tab" data-tab="c" type="button">Гръдна</button>
+        <button class="tab" role="tab" data-tab="wa" type="button">Талия</button>
+        <button class="tab" role="tab" data-tab="h" type="button">Ханш</button>
+      </div>
+    </div>
+    <div id="chartBox"></div>
+  </section>
+
+  <section class="hist" id="hist" hidden>
+    <div class="sec-head"><h2>Всички отчитания</h2><span class="lab">най-новите първи</span></div>
+    <div class="tscroll"><table>
+      <thead><tr><th>Седм.</th><th>Дата</th><th>Тегло, кг</th><th>Гръдна, см</th><th>Талия, см</th><th>Ханш, см</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+</div>
+
+<script>
+(function(){
+'use strict';
+var $=function(id){return document.getElementById(id)};
+var DAY=864e5, LS='mk-tracker-v1';
+var FIELDS=[{k:'w',l:'Тегло',u:'кг'},{k:'c',l:'Гръдна',u:'см'},{k:'wa',l:'Талия',u:'см'},{k:'h',l:'Ханш',u:'см'}];
+var MON=['ян','фев','мар','апр','май','юни','юли','авг','сеп','окт','ное','дек'];
+
+/* ---------- helpers ---------- */
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function pd(s){var p=s.split('-').map(Number);return new Date(p[0],p[1]-1,p[2])}
+function ds(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function today(){var n=new Date();return new Date(n.getFullYear(),n.getMonth(),n.getDate())}
+function addDays(d,n){return new Date(d.getFullYear(),d.getMonth(),d.getDate()+n)}
+function between(a,b){return Math.round((pd(b)-pd(a))/DAY)}
+function fd(s,y){var d=pd(s);return d.getDate()+' '+MON[d.getMonth()]+(y?' '+d.getFullYear():'')}
+function nf(n,d){if(d==null)d=1;return n.toFixed(d).replace('.',',').replace('-','−')}
+function sg(n,d){if(d==null)d=1;var r=Math.round(n*Math.pow(10,d))/Math.pow(10,d);return (r>0?'+':r<0?'−':'')+nf(Math.abs(r),d)}
+function sorted(a){return a.slice().sort(function(x,y){return x.d<y.d?-1:x.d>y.d?1:0})}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function pn(s){s=String(s).trim().replace(',','.');if(s==='')return null;var n=Number(s);return isFinite(n)?n:NaN}
+
+/* ---------- state ---------- */
+var PROFILE_KEYS=['irka','mirko'];
+var activeProfile='irka';
+var stateProfiles={irka:makeEmptyProfile(),mirko:makeEmptyProfile()};
+var S=stateProfiles[activeProfile];
+var dirty={s:false,g:false};
+function all(D){return D.start?[Object.assign({s:1},D.start)].concat(D.entries):D.entries}
+var demo=false, loaded=false, tab='w', editing=null, delKey=null;
+var mode='local', ref=null, saving=Promise.resolve(), pending=0;
+
+function makeEmptyProfile(){return {goal:{weight:null,date:null},start:null,entries:[]}}
+function profileLabel(key){return key==='mirko'?'Мирко':'Ирка'}
+function normalizeProfile(data){
+  var profile=makeEmptyProfile();
+  if(!data||typeof data!=='object')return profile;
+  var g=(data.goal||{}),start=data.start||null;
+  profile.goal={weight:typeof g.weight==='number'?g.weight:null,date:typeof g.date==='string'?g.date:null};
+  profile.start=data&&valid(start)?Object.assign({},start):null;
+  profile.entries=Array.isArray(data.entries)?data.entries.filter(valid):[];
+  return profile;
+}
+function restoreProfiles(raw){
+  var obj=raw&&typeof raw==='object'?raw:{};
+  var profiles=obj.profiles&&typeof obj.profiles==='object'?obj.profiles:{};
+  PROFILE_KEYS.forEach(function(key){
+    var cand=profiles[key];
+    if(!cand && key==='irka' && Object.keys(obj).length && (obj.goal!==undefined||obj.entries!==undefined||obj.start!==undefined)) cand=obj;
+    stateProfiles[key]=normalizeProfile(cand || makeEmptyProfile());
+  });
+  activeProfile=(obj.activeProfile&&PROFILE_KEYS.indexOf(obj.activeProfile)!==-1)?obj.activeProfile:'irka';
+  S=stateProfiles[activeProfile];
+}
+function setActiveProfile(key){
+  if(PROFILE_KEYS.indexOf(key)===-1)return;
+  if(!stateProfiles[key])stateProfiles[key]=makeEmptyProfile();
+  activeProfile=key;S=stateProfiles[key];editing=null;delKey=null;renderAll();
+}
+function syncProfileTabs(){
+  Array.prototype.forEach.call(document.querySelectorAll('.profile-tab'),function(btn){
+    btn.setAttribute('aria-selected',btn.dataset.profile===activeProfile?'true':'false');
+  });
+}
+function demoData(){
+  var t=today();
+  var w=[84.6,83.9,83.3,82.7,82.2,81.4,80.9,80.3], c=[103,102.5,102,101.5,101.5,101,100.5,100],
+      wa=[92,91.5,90.5,90,89.5,88.5,88,87], h=[108,107.5,107.5,107,106.5,106,105.5,105];
+  return {goal:{weight:74,date:ds(addDays(t,84))},
+    entries:w.map(function(x,i){return {d:ds(addDays(t,-2-7*(7-i))),w:x,c:c[i],wa:wa[i],h:h[i]}})};
+}
+var DEMO=null;
+function cur(){if(demo){if(!DEMO)DEMO=demoData();return DEMO}return S}
+
+/* ---------- persistence ---------- */
+function valid(e){return e&&typeof e.d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(e.d)&&typeof e.w==='number'&&isFinite(e.w)}
+function applyDoc(data){
+  if(data&&data.profiles&&typeof data.profiles==='object'){
+    restoreProfiles(data);return;
+  }
+  stateProfiles[activeProfile]=normalizeProfile(data||makeEmptyProfile());
+  S=stateProfiles[activeProfile];
+}
+function payloadForState(data){return {v:1,goal:{weight:data.goal.weight,date:data.goal.date},start:data.start?Object.assign({},data.start):null,entries:data.entries.map(function(e){return Object.assign({},e)})}}
+function payload(){return payloadForState(S)}
+function persistProfiles(){
+  var out={v:1,activeProfile:activeProfile,profiles:{}};
+  PROFILE_KEYS.forEach(function(key){out.profiles[key]=payloadForState(stateProfiles[key]||makeEmptyProfile())});
+  return out;
+}
+function lsWrite(){try{localStorage.setItem(LS,JSON.stringify(persistProfiles()))}catch(e){}}
+function lsRead(){try{var r=localStorage.getItem(LS);return r?JSON.parse(r):null}catch(e){return null}}
+function persist(){
+  stateProfiles[activeProfile]=normalizeProfile(S);
+  if(mode==='cloud'&&ref){
+    var body=payload();pending++;
+    saving=saving.then(function(){return ref.set(body)}).catch(function(err){
+      console.warn(err);mode='local';lsWrite();renderNote();
+    }).then(function(){pending--});
+  }else lsWrite();
+}
+function renderNote(){
+  $('storeNote').textContent=!loaded?'':mode==='cloud'
+    ?'Записите се пазят в профила ти и ги виждаш само ти, от всяко устройство.'
+    :'Записите се пазят само в този браузър. Ако изчистиш данните му, ще се изгубят.';
+}
+function startLocal(){mode='local';restoreProfiles(lsRead());loaded=true;renderAll()}
+function init(){
+  renderAll();
+  var done=false;
+  var timer=setTimeout(function(){if(!done){done=true;startLocal()}},3500);
+  (async function(){
+    try{
+      var c=window.claude;
+      if(!c||!c.use)throw 0;
+      var parts=await Promise.all([c.use('db'),c.use('user')]);
+      var db=parts[0],user=parts[1];
+      var id=user?await user.id():null;
+      if(done)return;
+      if(!db||!id)throw 0;
+      done=true;clearTimeout(timer);
+      ref=db.doc('data/users/'+id+'/tracker');mode='cloud';
+      ref.onSnapshot(function(snap){
+        if(pending>0||(snap.metadata&&snap.metadata.hasPendingWrites))return;
+        applyDoc(snap.exists?snap.data():null);loaded=true;renderAll();
+      },function(err){console.warn(err);mode='local';startLocal()});
+    }catch(e){if(!done){done=true;clearTimeout(timer);startLocal()}}
+  })();
+}
+
+/* ---------- render ---------- */
+function lossGoal(D,es){return !(D.goal.weight!=null&&es.length&&D.goal.weight>es[0].w)}
+
+function renderHead(){
+  var D=cur(),es=sorted(all(D)),el=$('meta');
+  if(!loaded){el.innerHTML='';return}
+  var profilePill='<span class="pill">'+profileLabel(activeProfile)+'</span>';
+  if(!es.length){el.innerHTML=profilePill+'<span class="pill">Отчитане веднъж седмично</span>';return}
+  var t=ds(today()),wk=Math.floor(Math.max(0,between(es[0].d,t))/7)+1,l=es[es.length-1],since=between(l.d,t);
+  var next=ds(addDays(pd(l.d),7)),due=since>=7;
+  el.innerHTML=profilePill+'<span class="pill">Седмица '+wk+'</span>'+
+    (due?'<span class="pill due">Време е за седмично отчитане</span>'
+        :'<span class="pill">Следващо отчитане: '+fd(next)+' ('+(7-Math.max(since,0))+' дн.)</span>');
+}
+
+function renderProgress(){
+  var el=$('prog'),D=cur(),es=sorted(all(D));
+  if(!loaded){el.innerHTML='<p class="muted">Зареждане на записите…</p>';return}
+  if(!es.length){
+    el.innerHTML='<div class="hero-empty"><div class="tape" aria-hidden="true"></div>'+
+      '<p class="muted">Още няма записи. Въведи началните си килограми и мерки в панела „Начало“, после добавяй седмичните отчитания и тук ще се появи напредъкът към целта.</p>'+
+      '<button class="btn alt" type="button" data-act="demo">Виж с примерни данни</button></div>';
+    return;
+  }
+  var f=es[0],l=es[es.length-1],g=D.goal.weight,loss=lossGoal(D,es),diff=f.w-l.w,html='';
+  var rem=g!=null?(l.w-g)*(loss?1:-1):null;
+
+  html+='<div class="tiles">';
+  html+='<div class="tile"><div class="lab">Сега</div><div class="big">'+nf(l.w)+'<small>кг</small></div><div class="sub">към '+fd(l.d)+'</div></div>';
+  html+='<div class="tile"><div class="lab">'+(diff>=0?'Свалени':'Качени')+'</div><div class="big">'+nf(Math.abs(diff))+'<small>кг</small></div><div class="sub">от '+nf(f.w)+' кг на '+fd(f.d)+'</div></div>';
+  if(g==null) html+='<div class="tile"><div class="lab">Цел</div><div class="big">—</div><div class="sub"><button class="lnk" type="button" data-act="goal" style="padding:0">Задай цел</button></div></div>';
+  else if(rem<=0) html+='<div class="tile"><div class="lab">Цел</div><div class="big" style="font-size:clamp(1.1rem,4vw,1.5rem)">Постигната</div><div class="sub">цел '+nf(g)+' кг</div></div>';
+  else html+='<div class="tile"><div class="lab">До целта</div><div class="big">'+nf(rem)+'<small>кг</small></div><div class="sub">цел '+nf(g)+' кг</div></div>';
+  html+='</div>';
+
+  if(g!=null&&f.w!==g){
+    var pct=clamp((f.w-l.w)/(f.w-g),0,1)*100;
+    html+='<div class="tapewrap"><div class="pin" style="left:clamp(28px,'+pct.toFixed(1)+'%,calc(100% - 28px))">'+nf(l.w)+'</div>'+
+      '<div class="tape" role="progressbar" aria-label="Напредък към целта" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.round(pct)+'"><div class="tape-fill" style="width:'+pct.toFixed(1)+'%"></div></div></div>'+
+      '<div class="tape-labels"><span>Старт '+nf(f.w)+'</span><span>'+Math.round(pct)+'%</span><span>Цел '+nf(g)+'</span></div>';
+  }else html+='<div style="height:20px"></div>';
+
+  var span=between(f.d,l.d),pace='';
+  if(span>=7){pace+='<span>Средно '+sg((l.w-f.w)/(span/7))+' кг на седмица досега.</span>'}
+  if(g!=null&&D.goal.date&&rem>0){
+    var left=between(ds(today()),D.goal.date);
+    if(left>0)pace+='<span>За целта до '+fd(D.goal.date,true)+' трябва ≈'+nf(rem/(left/7))+' кг на седмица.</span>';
+    else pace+='<span>Срокът за целта е изтекъл.</span>';
+  }
+  if(pace)html+='<div class="pace">'+pace+'</div>';
+
+  var ms='';
+  [FIELDS[1],FIELDS[2],FIELDS[3]].forEach(function(F){
+    var a=es.filter(function(e){return e[F.k]!=null});
+    if(!a.length)return;
+    var a0=a[0][F.k],a1=a[a.length-1][F.k],dl=a1-a0;
+    var cls=Math.abs(dl)<0.05?'':((dl<0)===loss?'good':'bad');
+    ms+='<div class="tile"><div class="lab">'+F.l+'</div><div class="mv">'+nf(a1)+' см</div><div class="dl '+cls+'">'+(a.length>1?sg(dl)+' см от старта':'първо измерване')+'</div></div>';
+  });
+  if(ms)html+='<div class="measures">'+ms+'</div>';
+  el.innerHTML=html;
+}
+
+var lastW=0;
+function renderChart(){
+  var box=$('chartBox'),D=cur(),es=sorted(all(D));
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'),function(b){b.setAttribute('aria-selected',b.dataset.tab===tab?'true':'false')});
+  var F=FIELDS.filter(function(x){return x.k===tab})[0];
+  var pts=es.filter(function(e){return e[tab]!=null}).map(function(e){return {t:pd(e.d).getTime(),v:e[tab],d:e.d}});
+  if(!loaded||!pts.length){
+    box.innerHTML='<p class="muted" style="padding-block:24px">'+(loaded?'Графиката се появява след първото отчитане.':'')+'</p>';return;
+  }
+  var W=Math.max(box.clientWidth,260),H=W<480?250:310;lastW=W;
+  var L=40,R=24,T=26,B=30,iw=W-L-R,ih=H-T-B;
+  var g=tab==='w'?D.goal.weight:null;
+  var vals=pts.map(function(p){return p.v});if(g!=null)vals.push(g);
+  var mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals),rg=(mx-mn)||1;
+  mn-=rg*.08;mx+=rg*.08;
+  var raw=(mx-mn)/4,mag=Math.pow(10,Math.floor(Math.log10(raw))),step=mag;
+  [1,2,2.5,5,10].some(function(m){step=m*mag;return step>=raw});
+  var lo=Math.floor(mn/step)*step,hi=Math.ceil(mx/step)*step,dec=step%1!==0?1:0;
+  var t0=pts[0].t,t1=pts[pts.length-1].t;
+  if(t1===t0){t0-=3.5*DAY;t1+=3.5*DAY}
+  var X=function(t){return L+(t-t0)/(t1-t0)*iw},Y=function(v){return T+(1-(v-lo)/(hi-lo))*ih};
+  var s='<svg viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'" role="img" aria-label="Графика: '+F.l.toLowerCase()+' във времето">';
+  s+='<text class="g-t" x="0" y="11">'+F.u+'</text>';
+  for(var v=lo;v<=hi+step/2;v+=step){
+    var y=Y(v);s+='<line class="g-line" x1="'+L+'" x2="'+(W-R)+'" y1="'+y+'" y2="'+y+'"/><text class="g-t" x="'+(L-8)+'" y="'+(y+4)+'" text-anchor="end">'+nf(v,dec)+'</text>';
+  }
+  var n=W<480?3:5,idx=[];
+  if(pts.length<=n)pts.forEach(function(_,i){idx.push(i)});
+  else for(var i=0;i<n;i++)idx.push(Math.round(i*(pts.length-1)/(n-1)));
+  idx.forEach(function(i,j){
+    var p=pts[i],anc=pts.length===1?'middle':(j===0?'start':j===idx.length-1?'end':'middle');
+    s+='<text class="g-t" x="'+X(p.t)+'" y="'+(H-8)+'" text-anchor="'+anc+'">'+fd(p.d)+'</text>';
+  });
+  if(g!=null){var gy=Y(g);s+='<line class="g-goal" x1="'+L+'" x2="'+(W-R)+'" y1="'+gy+'" y2="'+gy+'"/><text class="g-goalt" x="'+(W-R)+'" y="'+(gy-6)+'" text-anchor="end">Цел '+nf(g)+'</text>'}
+  var line=pts.map(function(p,i){return (i?'L':'M')+X(p.t).toFixed(1)+' '+Y(p.v).toFixed(1)}).join(' ');
+  if(pts.length>1)s+='<path class="g-area" d="'+line+' L'+X(pts[pts.length-1].t).toFixed(1)+' '+(T+ih)+' L'+X(pts[0].t).toFixed(1)+' '+(T+ih)+' Z"/><path class="g-path" d="'+line+'"/>';
+  pts.forEach(function(p,i){
+    var last=i===pts.length-1;
+    s+='<circle class="'+(last?'g-last':'g-dot')+'" cx="'+X(p.t)+'" cy="'+Y(p.v)+'" r="'+(last?6:4)+'"><title>'+fd(p.d,true)+': '+nf(p.v)+' '+F.u+'</title></circle>';
+  });
+  var lp=pts[pts.length-1],lx=X(lp.t);
+  s+='<text class="g-val" x="'+lx+'" y="'+(Y(lp.v)-12)+'" text-anchor="'+(lx>W-R-24?'end':'middle')+'">'+nf(lp.v)+'</text>';
+  box.innerHTML=s+'</svg>';
+}
+
+function renderTable(){
+  var D=cur(),es=sorted(all(D)),sec=$('hist');
+  if(!loaded||!es.length){sec.hidden=true;return}
+  sec.hidden=false;
+  var loss=lossGoal(D,es),f=es[0],html='';
+  for(var i=es.length-1;i>=0;i--){
+    var e=es[i],hasStart=!!D.start,wk=hasStart?Math.max(1,Math.floor(between(f.d,e.d)/7)):Math.floor(between(f.d,e.d)/7)+1;
+    html+='<tr><td class="wk">'+(e.s?'Старт':wk)+'</td><td>'+fd(e.d,true)+(e.n?'<span class="note">'+esc(e.n)+'</span>':'')+'</td>';
+    FIELDS.forEach(function(F){
+      if(e[F.k]==null){html+='<td class="num muted">—</td>';return}
+      var prev=null;for(var j=i-1;j>=0;j--){if(es[j][F.k]!=null){prev=es[j];break}}
+      var dl=prev?e[F.k]-prev[F.k]:null,cls=dl==null||Math.abs(dl)<0.05?'':((dl<0)===loss?'good':'bad');
+      html+='<td class="num">'+nf(e[F.k])+(dl!=null?'<span class="d '+cls+'">'+sg(dl)+'</span>':'')+'</td>';
+    });
+    html+='<td class="act">';
+    if(!demo){
+      if(e.s)html+='<button class="lnk" type="button" data-act="editstart">Промени</button>';
+      else if(delKey===e.d)html+='<button class="lnk bad" type="button" data-act="delok" data-d="'+e.d+'">Потвърди</button><button class="lnk" type="button" data-act="delno">Отказ</button>';
+      else html+='<button class="lnk" type="button" data-act="edit" data-d="'+e.d+'">Промени</button><button class="lnk" type="button" data-act="del" data-d="'+e.d+'">Изтрий</button>';
+    }
+    html+='</td></tr>';
+  }
+  $('rows').innerHTML=html;
+}
+
+function renderForm(){
+  var es=sorted(all(S)),l=es[es.length-1];
+  FIELDS.forEach(function(F){
+    var id=F.k==='w'?'f-w':F.k==='c'?'f-c':F.k==='wa'?'f-wa':'f-h',inp=$(id),ex={w:'72,4',c:'95',wa:'78',h:'102'}[F.k];
+    var last=null;for(var i=es.length-1;i>=0;i--){if(es[i][F.k]!=null){last=es[i][F.k];break}}
+    inp.placeholder=last!=null?nf(last):ex;
+  });
+  $('f-date').max=ds(today());
+  $('formTitle').textContent=editing?'Промяна на отчитане':'Седмично отчитане';
+  $('saveBtn').textContent=editing?'Обнови отчитането':'Запази отчитането';
+  $('cancelEdit').hidden=!editing;
+}
+function renderAll(){
+  $('demoBar').hidden=!demo;
+  syncProfileTabs();
+  renderHead();renderProgress();renderChart();renderTable();renderForm();renderNote();
+}
+
+/* ---------- actions ---------- */
+function setMsg(id,text,cls){var m=$(id);m.textContent=text;m.className='msg'+(cls?' '+cls:'')}
+function resetEntryForm(){
+  ['f-w','f-c','f-wa','f-h','f-n'].forEach(function(id){$(id).value=''});
+  $('f-date').value=ds(today());editing=null;
+}
+
+$('f-entry').addEventListener('submit',function(ev){
+  ev.preventDefault();
+  var date=$('f-date').value,w=pn($('f-w').value),c=pn($('f-c').value),wa=pn($('f-wa').value),h=pn($('f-h').value);
+  if(!date)return setMsg('msg','Избери дата на измерването.','err');
+  if(date>ds(today()))return setMsg('msg','Датата не може да е в бъдещето.','err');
+  if(w===null)return setMsg('msg','Въведи теглото в килограми.','err');
+  if([w,c,wa,h].some(function(x){return Number.isNaN(x)}))return setMsg('msg','Въведи число, например 72,4.','err');
+  if(w<20||w>400)return setMsg('msg','Теглото трябва да е между 20 и 400 кг.','err');
+  var bad=[['гръдната обиколка',c],['талията',wa],['ханша',h]].filter(function(p){return p[1]!=null&&(p[1]<20||p[1]>250)})[0];
+  if(bad)return setMsg('msg','Стойността за '+bad[0]+' трябва да е между 20 и 250 см.','err');
+  if(demo){demo=false;editing=null}
+  var e={d:date,w:w};
+  if(c!=null)e.c=c;if(wa!=null)e.wa=wa;if(h!=null)e.h=h;
+  var note=$('f-n').value.trim().slice(0,200);if(note)e.n=note;
+  if(editing&&editing!==date)S.entries=S.entries.filter(function(x){return x.d!==editing});
+  var i=S.entries.findIndex(function(x){return x.d===date});
+  if(i>=0)S.entries[i]=e;else S.entries.push(e);
+  var wasEdit=!!editing;
+  persist();resetEntryForm();renderAll();
+  setMsg('msg',wasEdit?'Отчитането е обновено.':'Отчитането е запазено.','ok');
+});
+$('cancelEdit').addEventListener('click',function(){resetEntryForm();setMsg('msg','');renderAll()});
+
+$('f-goal').addEventListener('submit',function(ev){
+  ev.preventDefault();
+  var w=pn($('g-w').value),d=$('g-d').value||null;
+  if(w===null){S.goal={weight:null,date:null};if(demo)demo=false;dirty.g=false;persist();renderAll();$('g-d').value='';return setMsg('gmsg','Целта е изчистена.','ok')}
+  if(Number.isNaN(w)||w<20||w>400)return setMsg('gmsg','Въведи целево тегло между 20 и 400 кг.','err');
+  if(d&&d<=ds(today()))return setMsg('gmsg','Датата за целта трябва да е в бъдещето.','err');
+  if(demo)demo=false;
+  S.goal={weight:w,date:d};dirty.g=false;persist();renderAll();
+  setMsg('gmsg','Целта е запазена.','ok');
+});
+
+$('f-start').addEventListener('submit',function(ev){
+  ev.preventDefault();
+  var date=$('s-date').value,w=pn($('s-w').value),c=pn($('s-c').value),wa=pn($('s-wa').value),h=pn($('s-h').value);
+  if(w===null&&c===null&&wa===null&&h===null){
+    if(demo)demo=false;S.start=null;dirty.s=false;persist();renderAll();
+    return setMsg('smsg','Началото е изчистено.','ok');
+  }
+  if(!date)return setMsg('smsg','Избери дата на началното измерване.','err');
+  if(date>ds(today()))return setMsg('smsg','Датата не може да е в бъдещето.','err');
+  if(w===null)return setMsg('smsg','Въведи началното тегло в килограми.','err');
+  if([w,c,wa,h].some(function(x){return Number.isNaN(x)}))return setMsg('smsg','Въведи число, например 84,6.','err');
+  if(w<20||w>400)return setMsg('smsg','Теглото трябва да е между 20 и 400 кг.','err');
+  var bad=[['гръдната обиколка',c],['талията',wa],['ханша',h]].filter(function(p){return p[1]!=null&&(p[1]<20||p[1]>250)})[0];
+  if(bad)return setMsg('smsg','Стойността за '+bad[0]+' трябва да е между 20 и 250 см.','err');
+  if(demo)demo=false;
+  var s={d:date,w:w};
+  if(c!=null)s.c=c;if(wa!=null)s.wa=wa;if(h!=null)s.h=h;
+  S.start=s;dirty.s=false;persist();renderAll();
+  setMsg('smsg','Началото е запазено.','ok');
+});
+$('f-start').addEventListener('input',function(){dirty.s=true});
+$('f-goal').addEventListener('input',function(){dirty.g=true});
+
+document.addEventListener('click',function(ev){
+  var t=ev.target.closest('[data-act],[data-tab],[data-profile]');if(!t)return;
+  if(t.dataset.profile){setActiveProfile(t.dataset.profile);return}
+  if(t.dataset.tab){tab=t.dataset.tab;renderChart();return}
+  var act=t.dataset.act,d=t.dataset.d;
+  if(act==='demo'){demo=true;DEMO=null;renderAll()}
+  else if(act==='exitdemo'){demo=false;renderAll()}
+  else if(act==='goal'){$('g-w').focus()}
+  else if(act==='editstart'){$('f-start').scrollIntoView({block:'nearest'});$('s-w').focus()}
+  else if(act==='edit'){
+    var e=S.entries.filter(function(x){return x.d===d})[0];if(!e)return;
+    editing=d;$('f-date').value=e.d;$('f-w').value=nf(e.w);
+    $('f-c').value=e.c!=null?nf(e.c):'';$('f-wa').value=e.wa!=null?nf(e.wa):'';$('f-h').value=e.h!=null?nf(e.h):'';
+    $('f-n').value=e.n||'';setMsg('msg','');renderForm();
+    $('f-entry').scrollIntoView({block:'nearest'});$('f-w').focus();
+  }
+  else if(act==='del'){delKey=d;renderTable()}
+  else if(act==='delno'){delKey=null;renderTable()}
+  else if(act==='delok'){
+    S.entries=S.entries.filter(function(x){return x.d!==d});delKey=null;
+    if(editing===d)resetEntryForm();
+    persist();renderAll();
+  }
+});
+
+/* goal inputs show saved goal */
+function syncGoalInputs(){
+  var g=S.goal,s=S.start;
+  if(!dirty.g){
+    $('g-w').value=g.weight!=null?nf(g.weight):'';
+    $('g-d').value=g.date||'';
+  }
+  if(!dirty.s){
+    $('s-date').value=s?s.d:ds(today());
+    $('s-w').value=s?nf(s.w):'';
+    $('s-c').value=s&&s.c!=null?nf(s.c):'';
+    $('s-wa').value=s&&s.wa!=null?nf(s.wa):'';
+    $('s-h').value=s&&s.h!=null?nf(s.h):'';
+  }
+  $('s-date').max=ds(today());
+}
+var _ra=renderAll;renderAll=function(){_ra();syncGoalInputs()};
+
+if('ResizeObserver' in window){
+  new ResizeObserver(function(){var w=$('chartBox').clientWidth;if(Math.abs(w-lastW)>2)renderChart()}).observe($('chartBox'));
+}else window.addEventListener('resize',renderChart);
+
+$('f-date').value=ds(today());
+init();
+})();
+</script>
+
+</html>
