@@ -26,6 +26,8 @@ db.exec(`
     id INTEGER PRIMARY KEY,
     email TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL,
+    display_name TEXT,
+    profile_key TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
   CREATE TABLE IF NOT EXISTS tracker_data (
@@ -39,6 +41,19 @@ db.exec(`
     expires_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);
+  CREATE TABLE IF NOT EXISTS competition_data (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    data TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+const userColumns = new Set(db.pragma('table_info(users)').map((column) => column.name));
+if (!userColumns.has('display_name')) db.exec('ALTER TABLE users ADD COLUMN display_name TEXT');
+if (!userColumns.has('profile_key')) db.exec('ALTER TABLE users ADD COLUMN profile_key TEXT');
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS users_profile_key_idx ON users(profile_key) WHERE profile_key IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS users_display_name_idx ON users(display_name COLLATE NOCASE) WHERE display_name IS NOT NULL;
 `);
 
 class SqliteSessionStore extends session.Store {
@@ -168,6 +183,68 @@ function validateTrackerData(value) {
   return ['irka', 'mirko'].every((key) => validateProfile(value.profiles[key]));
 }
 
+function emptyTrackerData() {
+  const emptyProfile = () => ({ goal: { weight: null, date: null }, start: null, entries: [] });
+  return { v: 1, activeProfile: 'irka', profiles: { irka: emptyProfile(), mirko: emptyProfile() } };
+}
+
+function participantList() {
+  return db.prepare('SELECT profile_key, display_name FROM users WHERE profile_key IS NOT NULL')
+    .all()
+    .map((user) => ({ profileKey: user.profile_key, displayName: user.display_name }));
+}
+
+function profileSummary(profile) {
+  const entries = profile.entries.slice().sort((a, b) => a.d.localeCompare(b.d));
+  const latest = entries[entries.length - 1] || null;
+  const today = entries.find((entry) => entry.d === todayInBulgaria()) || null;
+  return {
+    start: profile.start,
+    goal: profile.goal,
+    todayWeight: today ? today.w : null,
+    latestWeight: latest ? latest.w : null,
+    latestDate: latest ? latest.d : null
+  };
+}
+
+function assignProfile(userId, displayName) {
+  return db.transaction(() => {
+    const user = db.prepare('SELECT id, profile_key FROM users WHERE id = ?').get(userId);
+    if (!user) throw new Error('Потребителят не съществува.');
+    if (user.profile_key) {
+      return db.prepare('SELECT id, email, display_name, profile_key FROM users WHERE id = ?').get(userId);
+    }
+
+    const occupied = new Set(db.prepare('SELECT profile_key FROM users WHERE profile_key IS NOT NULL')
+      .all().map((row) => row.profile_key));
+    const profileKey = ['irka', 'mirko'].find((key) => !occupied.has(key));
+    if (!profileKey) {
+      const error = new Error('Състезанието вече има двама участници.');
+      error.status = 409;
+      throw error;
+    }
+
+    const legacyRow = db.prepare('SELECT data FROM tracker_data WHERE user_id = ?').get(userId);
+    const competitionRow = db.prepare('SELECT data FROM competition_data WHERE id = 1').get();
+    const data = competitionRow ? JSON.parse(competitionRow.data) : emptyTrackerData();
+    if (legacyRow) {
+      const legacy = JSON.parse(legacyRow.data);
+      const oldProfile = legacy.profiles && legacy.profiles[profileKey]
+        ? legacy.profiles[profileKey]
+        : profileKey === 'irka' && !legacy.profiles ? legacy : null;
+      if (oldProfile && validateProfile(oldProfile)) data.profiles[profileKey] = oldProfile;
+    }
+
+    db.prepare('UPDATE users SET display_name = ?, profile_key = ? WHERE id = ?')
+      .run(displayName, profileKey, userId);
+    db.prepare(`
+      INSERT INTO competition_data (id, data, updated_at) VALUES (1, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = CURRENT_TIMESTAMP
+    `).run(JSON.stringify(data));
+    return db.prepare('SELECT id, email, display_name, profile_key FROM users WHERE id = ?').get(userId);
+  })();
+}
+
 function requireUser(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'Влез в акаунта си, за да продължиш.' });
   next();
@@ -180,7 +257,11 @@ function establishSession(req, user, statusCode, res, next) {
     req.session.email = user.email;
     req.session.save((saveError) => {
       if (saveError) return next(saveError);
-      res.status(statusCode).json({ user: { email: user.email } });
+      res.status(statusCode).json({ user: {
+        email: user.email,
+        displayName: user.display_name,
+        profileKey: user.profile_key
+      } });
     });
   });
 }
@@ -192,6 +273,10 @@ app.post('/api/auth/register', authRateLimit, async (req, res, next) => {
     }
     const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const password = typeof req.body.password === 'string' ? req.body.password : '';
+    const displayName = typeof req.body.displayName === 'string' ? req.body.displayName.trim() : '';
+    if (!displayName || displayName.length > 40 || /[\u0000-\u001f\u007f]/.test(displayName)) {
+      return res.status(400).json({ error: 'Въведи име за таба (до 40 символа).' });
+    }
     if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'Въведи валиден имейл адрес.' });
     }
@@ -200,17 +285,34 @@ app.post('/api/auth/register', authRateLimit, async (req, res, next) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    let result;
+    let user;
     try {
-      result = db.prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)').run(email, passwordHash);
+      user = db.transaction(() => {
+        const occupied = new Set(db.prepare('SELECT profile_key FROM users WHERE profile_key IS NOT NULL')
+          .all().map((row) => row.profile_key));
+        const profileKey = ['irka', 'mirko'].find((key) => !occupied.has(key));
+        if (!profileKey) {
+          const error = new Error('Състезанието вече има двама участници.');
+          error.status = 409;
+          throw error;
+        }
+        const result = db.prepare(
+          'INSERT INTO users (email, password_hash, display_name, profile_key) VALUES (?, ?, ?, ?)'
+        ).run(email, passwordHash, displayName, profileKey);
+        return { id: Number(result.lastInsertRowid), email, display_name: displayName, profile_key: profileKey };
+      })();
     } catch (error) {
       if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-        return res.status(409).json({ error: 'Вече има акаунт с този имейл адрес.' });
+        const message = error.message.includes('display_name')
+          ? 'Това име вече е заето.'
+          : 'Вече има акаунт с този имейл адрес.';
+        return res.status(409).json({ error: message });
       }
+      if (error.status) return res.status(error.status).json({ error: error.message });
       throw error;
     }
 
-    establishSession(req, { id: Number(result.lastInsertRowid), email }, 201, res, next);
+    establishSession(req, user, 201, res, next);
   } catch (error) {
     next(error);
   }
@@ -223,7 +325,7 @@ app.post('/api/auth/login', authRateLimit, async (req, res, next) => {
     }
     const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const password = typeof req.body.password === 'string' ? req.body.password : '';
-    const user = db.prepare('SELECT id, email, password_hash FROM users WHERE email = ?').get(email);
+    const user = db.prepare('SELECT id, email, password_hash, display_name, profile_key FROM users WHERE email = ?').get(email);
     if (!user || !await bcrypt.compare(password, user.password_hash)) {
       return res.status(401).json({ error: 'Имейлът или паролата са неправилни.' });
     }
@@ -235,7 +337,34 @@ app.post('/api/auth/login', authRateLimit, async (req, res, next) => {
 
 app.get('/api/auth/session', (req, res) => {
   if (!req.session.userId) return res.json({ user: null });
-  res.json({ user: { email: req.session.email } });
+  const user = db.prepare('SELECT email, display_name, profile_key FROM users WHERE id = ?').get(req.session.userId);
+  if (!user) return res.json({ user: null });
+  res.json({ user: {
+    email: user.email,
+    displayName: user.display_name,
+    profileKey: user.profile_key
+  } });
+});
+
+app.post('/api/auth/profile', requireUser, (req, res, next) => {
+  try {
+    const displayName = req.body && typeof req.body.displayName === 'string' ? req.body.displayName.trim() : '';
+    if (!displayName || displayName.length > 40 || /[\u0000-\u001f\u007f]/.test(displayName)) {
+      return res.status(400).json({ error: 'Въведи име за таба (до 40 символа).' });
+    }
+    const user = assignProfile(req.session.userId, displayName);
+    res.json({ user: {
+      email: user.email,
+      displayName: user.display_name,
+      profileKey: user.profile_key
+    } });
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return res.status(409).json({ error: 'Това име вече е заето.' });
+    }
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
 });
 
 app.post('/api/auth/logout', requireUser, (req, res, next) => {
@@ -248,8 +377,22 @@ app.post('/api/auth/logout', requireUser, (req, res, next) => {
 
 app.get('/api/data', requireUser, (req, res, next) => {
   try {
-    const row = db.prepare('SELECT data FROM tracker_data WHERE user_id = ?').get(req.session.userId);
-    res.json({ data: row ? JSON.parse(row.data) : null });
+    const user = db.prepare('SELECT profile_key FROM users WHERE id = ?').get(req.session.userId);
+    if (!user || !user.profile_key) {
+      return res.status(409).json({ error: 'Преди да продължиш, задай име за своя таб.' });
+    }
+    const row = db.prepare('SELECT data FROM competition_data WHERE id = 1').get();
+    const sharedData = row ? JSON.parse(row.data) : emptyTrackerData();
+    const otherKey = user.profile_key === 'irka' ? 'mirko' : 'irka';
+    const otherProfile = sharedData.profiles[otherKey];
+    const data = emptyTrackerData();
+    data.activeProfile = user.profile_key;
+    data.profiles[user.profile_key] = sharedData.profiles[user.profile_key];
+    res.json({
+      data,
+      summary: profileSummary(otherProfile),
+      participants: participantList()
+    });
   } catch (error) {
     next(error);
   }
@@ -260,10 +403,18 @@ app.put('/api/data', requireUser, (req, res, next) => {
     if (!validateTrackerData(req.body)) {
       return res.status(400).json({ error: 'Данните са невалидни. Провери измерванията и опитай отново.' });
     }
+    const user = db.prepare('SELECT profile_key FROM users WHERE id = ?').get(req.session.userId);
+    if (!user || !user.profile_key) {
+      return res.status(409).json({ error: 'Преди запис трябва да зададеш име за своя таб.' });
+    }
+    const row = db.prepare('SELECT data FROM competition_data WHERE id = 1').get();
+    const sharedData = row ? JSON.parse(row.data) : emptyTrackerData();
+    sharedData.profiles[user.profile_key] = req.body.profiles[user.profile_key];
+    sharedData.activeProfile = user.profile_key;
     db.prepare(`
-      INSERT INTO tracker_data (user_id, data, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, updated_at = CURRENT_TIMESTAMP
-    `).run(req.session.userId, JSON.stringify(req.body));
+      INSERT INTO competition_data (id, data, updated_at) VALUES (1, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = CURRENT_TIMESTAMP
+    `).run(JSON.stringify(sharedData));
     res.json({ ok: true });
   } catch (error) {
     next(error);
