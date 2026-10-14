@@ -5,7 +5,8 @@
   "description": "Personal measurements tracker with an authenticated SQLite backend",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test Tests/api.test.js Tests/frontend.test.js"
   },
   "engines": {
     "node": ">=20"

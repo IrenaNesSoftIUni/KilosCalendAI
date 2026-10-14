@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>html{color-scheme:light}body{margin:0}[hidden]{display:none!important}</style>
-<title>Мерки и килограми</title>
+<title>Надпревара с килограми</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600&family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
 /* Layout: open dashboard on the left (progress tape, chart, history), one card on the right for the weekly check-in. The yellow tailor's tape is the single bold element. */
 :root{
   --bg:#F1F5F2; --surface:#FFFFFF; --field:#F1F5F2;
   --ink:#12231D; --ink2:#4A5E56; --line:#D1DCD6;
-  --accent:#B83272; --on-accent:#FFFFFF;
+  --accent:#087F83; --on-accent:#FFFFFF;
   --tape:#F2C230; --tick:rgba(18,35,29,.7); --tick-fill:rgba(255,255,255,.55);
-  --goal:#9A7000; --area:rgba(184,50,114,.12);
+  --goal:#9A7000; --area:rgba(8,127,131,.14);
   --good:#2A7A3B; --bad:#B23A2B;
   --f-display:'Unbounded',system-ui,sans-serif;
   --f-body:'Onest',system-ui,-apple-system,'Segoe UI',sans-serif;
@@ -23,9 +23,9 @@
   :root:not([data-theme="light"]){
     --bg:#0E1713; --surface:#16221D; --field:#0E1713;
     --ink:#E6EFEA; --ink2:#9CB0A7; --line:#28382F;
-    --accent:#F08CB8; --on-accent:#2B0B1B;
+    --accent:#55D6D2; --on-accent:#082625;
     --tape:#E2B52B; --tick:rgba(14,23,19,.7); --tick-fill:rgba(43,11,27,.55);
-    --goal:#E2B52B; --area:rgba(240,140,184,.16);
+    --goal:#E2B52B; --area:rgba(85,214,210,.18);
     --good:#6FCB7E; --bad:#F18B79;
     color-scheme:dark;
   }
@@ -33,9 +33,9 @@
 :root[data-theme="dark"]{
   --bg:#0E1713; --surface:#16221D; --field:#0E1713;
   --ink:#E6EFEA; --ink2:#9CB0A7; --line:#28382F;
-  --accent:#F08CB8; --on-accent:#2B0B1B;
+  --accent:#55D6D2; --on-accent:#082625;
   --tape:#E2B52B; --tick:rgba(14,23,19,.7); --tick-fill:rgba(43,11,27,.55);
-  --goal:#E2B52B; --area:rgba(240,140,184,.16);
+  --goal:#E2B52B; --area:rgba(85,214,210,.18);
   --good:#6FCB7E; --bad:#F18B79;
   color-scheme:dark;
 }
@@ -50,9 +50,8 @@ button{font:inherit;color:inherit}
 .mono,.eyebrow,.lab,th,.pill,.unit,label{font-family:var(--f-mono)}
 .eyebrow{font-size:.75rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink2);margin-bottom:8px}
 .profile-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;margin-bottom:4px}
-.profile-tab{background:transparent;border:1px solid var(--line);border-radius:999px;padding:6px 14px;cursor:pointer;font-size:.82rem;color:var(--ink2)}
+.profile-tab{background:transparent;border:1px solid var(--line);border-radius:999px;padding:10px 18px;cursor:pointer;font-size:.95rem;color:var(--ink2)}
 .profile-tab[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-.profile-tab[data-profile="mirko"][aria-selected="true"]{background:#0E6A73;border-color:#0E6A73;color:#FFFFFF}
 .account{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 .account h2{margin:0}
 .account-form{display:grid;gap:10px}
@@ -65,7 +64,9 @@ button{font:inherit;color:inherit}
 .wrap{max-width:1040px;margin:0 auto;display:grid;gap:32px 44px;
   grid-template-columns:minmax(0,1fr);
   grid-template-areas:"head" "prog" "side" "chart" "hist"}
-.head{grid-area:head;display:grid;gap:14px;min-width:0}
+.head{grid-area:head;display:grid;gap:14px;min-width:0;position:relative}
+.head>div:first-child{padding-right:96px}
+.account-actions.top-actions{position:absolute;top:0;right:0;z-index:1}
 .prog{grid-area:prog;min-width:0}
 .side{grid-area:side;display:grid;gap:16px;min-width:0}
 .chart{grid-area:chart;min-width:0}
@@ -163,48 +164,63 @@ input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline
 .msg{min-height:1.4em;font-size:.88rem}
 .msg.err{color:var(--bad)} .msg.ok{color:var(--good)}
 .storenote{font-size:.8rem;color:var(--ink2);padding-inline:4px}
+.auth-page{max-width:480px;margin:8vh auto;padding:24px;display:grid;gap:20px}
+.auth-page[hidden],#appPage[hidden]{display:none}
+.auth-page h1{font-size:clamp(1.6rem,6vw,2.2rem)}
+.auth-page .account{padding:20px}
 @media (prefers-reduced-motion:reduce){.tape-fill{transition:none}}
 </style>
 
-<div class="wrap">
+<section class="auth-page" id="authPage" aria-labelledby="authTitle" hidden>
+  <div>
+    <p class="eyebrow">Двама души · една обща цел</p>
+    <h1 id="authTitle">Надпревара с килограми</h1>
+    <p class="muted">Влез, за да следиш своя напредък и да подкрепяш другия участник.</p>
+  </div>
+  <form class="account" id="authForm" novalidate>
+    <h2 id="authFormTitle">Вход</h2>
+    <div class="f"><label for="authEmail">Имейл</label><input id="authEmail" type="email" autocomplete="email" maxlength="254" required></div>
+    <div class="f"><label for="authPassword">Парола</label><input id="authPassword" type="password" autocomplete="current-password" minlength="12" maxlength="72" required></div>
+    <div class="f" id="registerNameWrap" hidden><label for="registerName">Име за твоя таб</label><input id="registerName" type="text" maxlength="40" autocomplete="name"></div>
+    <p class="muted" id="authHelp">Паролата трябва да е поне 12 символа.</p>
+    <div class="account-buttons">
+      <button class="btn" type="submit" id="authSubmit">Вход</button>
+      <button class="btn alt" type="button" id="authModeToggle">Регистрация</button>
+    </div>
+    <p class="account-message" id="accountMessage" role="status" aria-live="polite"></p>
+  </form>
+  <form class="account" id="profileSetupForm" hidden>
+    <h2>Настрой своя таб</h2>
+    <p class="muted">Този стар акаунт още няма име за участника. Въведи го еднократно, за да продължиш.</p>
+    <div class="f"><label for="profileSetupName">Име за твоя таб</label><input id="profileSetupName" type="text" maxlength="40" autocomplete="name" required></div>
+    <button class="btn" type="submit">Запази и продължи</button>
+  </form>
+</section>
+
+<div class="wrap" id="appPage" hidden>
   <header class="head">
     <div>
       <div class="profile-tabs" role="tablist" aria-label="Профил">
-        <button class="profile-tab" type="button" role="tab" aria-selected="true" data-profile="irka">Ирка</button>
-        <button class="profile-tab" type="button" role="tab" aria-selected="false" data-profile="mirko">Мирко</button>
+        <button class="profile-tab" type="button" role="tab" aria-selected="true" data-profile="irka">Участник 1</button>
+        <button class="profile-tab" type="button" role="tab" aria-selected="false" data-profile="mirko">Участник 2</button>
       </div>
-      <p class="eyebrow">Седмичен дневник</p>
+      <p class="eyebrow">Дневник на двама</p>
       <h1>Мерки и килограми</h1>
     </div>
     <div class="meta" id="meta"></div>
-    <section class="account" aria-labelledby="accountTitle">
-      <h2 id="accountTitle">Синхронизирай измерванията</h2>
-      <p class="muted" id="accountStatus" role="status" aria-live="polite">Проверка на акаунта…</p>
-      <form class="account-form" id="authForm" novalidate>
-        <div class="grid6">
-          <div class="f s3"><label for="authEmail">Имейл</label><input id="authEmail" type="email" autocomplete="email" maxlength="254" required></div>
-          <div class="f s3"><label for="authPassword">Парола</label><input id="authPassword" type="password" autocomplete="current-password" minlength="12" maxlength="72" required></div>
-        </div>
-        <p class="muted">Паролата трябва да е поне 12 символа. При вход локалните и сървърните записи се обединяват.</p>
-        <div class="account-buttons">
-          <button class="btn" type="submit" data-auth-action="login">Вход</button>
-          <button class="btn alt" type="submit" data-auth-action="register">Регистрация</button>
-        </div>
-      </form>
-      <div class="account-buttons" id="accountActions" hidden>
-        <button class="btn alt" type="button" id="logoutBtn">Изход</button>
-      </div>
-      <p class="account-message" id="accountMessage" role="status" aria-live="polite"></p>
-    </section>
+    <div class="account-buttons top-actions account-actions" id="accountActions" hidden>
+      <button class="btn alt" type="button" id="logoutBtn">Изход</button>
+    </div>
     <div id="demoBar" class="demo" hidden><span>Примерни данни. Нищо от това не е запазено.</span><button class="lnk" type="button" data-act="exitdemo">Започни със собствени</button></div>
   </header>
 
   <section class="prog" id="prog" aria-live="polite"></section>
+  <section class="panel" id="summary" aria-live="polite" hidden></section>
 
   <aside class="side">
     <form id="f-entry" class="panel" novalidate autocomplete="off">
-      <h2 id="formTitle">Седмично отчитане</h2>
-      <p class="hint">Мери се в един и същи ден и час всяка седмица.</p>
+      <h2 id="formTitle">Дневно отчитане</h2>
+      <p class="hint">Записвай теглото всеки ден. В петък добавяй и мерките.</p>
       <div class="grid6">
         <div class="f s3"><label for="f-date">Дата</label><input id="f-date" type="date"></div>
         <div class="f s3"><label for="f-w">Тегло</label><div class="fld"><input id="f-w" type="text" inputmode="decimal" placeholder="72,4"><span class="unit">кг</span></div></div>
@@ -262,7 +278,7 @@ input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline
   <section class="hist" id="hist" hidden>
     <div class="sec-head"><h2>Всички отчитания</h2><span class="lab">най-новите първи</span></div>
     <div class="tscroll"><table>
-      <thead><tr><th>Седм.</th><th>Дата</th><th>Тегло, кг</th><th>Гръдна, см</th><th>Талия, см</th><th>Ханш, см</th><th></th></tr></thead>
+      <thead><tr><th>№</th><th>Дата</th><th>Тегло, кг</th><th>Гръдна, см</th><th>Талия, см</th><th>Ханш, см</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
   </section>
@@ -294,15 +310,17 @@ function pn(s){s=String(s).trim().replace(',','.');if(s==='')return null;var n=N
 var PROFILE_KEYS=['irka','mirko'];
 var activeProfile='irka';
 var stateProfiles={irka:makeEmptyProfile(),mirko:makeEmptyProfile()};
+var profileNames={irka:'Участник 1',mirko:'Участник 2'};
+var otherSummary=null, participantsPresent={irka:false,mirko:false};
 var S=stateProfiles[activeProfile];
 var dirty={s:false,g:false};
 function all(D){return D.start?[Object.assign({s:1},D.start)].concat(D.entries):D.entries}
 var demo=false, loaded=false, tab='w', editing=null, delKey=null;
 var mode='local', currentUser=null, saving=Promise.resolve(), pending=0;
-var authInitializing=true, authBusy=false, authError='', syncError='', localError='';
+var authInitializing=true, authBusy=false, authError='', syncError='', localError='', authMode='login';
 
 function makeEmptyProfile(){return {goal:{weight:null,date:null},start:null,entries:[]}}
-function profileLabel(key){return key==='mirko'?'Мирко':'Ирка'}
+function profileLabel(key){return profileNames[key]||'Участник'}
 function normalizeProfile(data){
   var profile=makeEmptyProfile();
   if(!data||typeof data!=='object')return profile;
@@ -330,6 +348,7 @@ function setActiveProfile(key){
 }
 function syncProfileTabs(){
   Array.prototype.forEach.call(document.querySelectorAll('.profile-tab'),function(btn){
+    btn.textContent=profileLabel(btn.dataset.profile);
     btn.setAttribute('aria-selected',btn.dataset.profile===activeProfile?'true':'false');
   });
 }
@@ -355,11 +374,14 @@ function applyDoc(data){
 function payloadForState(data){return {v:1,goal:{weight:data.goal.weight,date:data.goal.date},start:data.start?Object.assign({},data.start):null,entries:data.entries.map(function(e){return Object.assign({},e)})}}
 function payload(){return payloadForState(S)}
 function persistProfiles(){
-  var out={v:1,activeProfile:activeProfile,profiles:{}};
+  var out={v:1,activeProfile:currentUser?currentUser.profileKey:activeProfile,profiles:{}};
   PROFILE_KEYS.forEach(function(key){out.profiles[key]=payloadForState(stateProfiles[key]||makeEmptyProfile())});
   return out;
 }
 function accountStorageKey(email){return LS+':account:'+encodeURIComponent(email.toLowerCase())}
+function localSnapshot(){
+  return {data:persistProfiles(),summary:otherSummary,participants:participantsPresent};
+}
 function lsWrite(key,data){
   try{localStorage.setItem(key,JSON.stringify(data));localError='';return true}
   catch(error){console.error('Неуспешен локален запис:',error);localError='Локалното копие не можа да бъде записано в този браузър.';return false}
@@ -367,27 +389,6 @@ function lsWrite(key,data){
 function lsRead(key){
   try{var r=localStorage.getItem(key);return r?JSON.parse(r):null}
   catch(error){console.error('Неуспешно прочитане на локалните данни:',error);localError='Локалните данни не можаха да бъдат прочетени.';return null}
-}
-function trackerData(raw){
-  var profiles=raw&&raw.profiles&&typeof raw.profiles==='object'?raw.profiles:{};
-  return {v:1,activeProfile:raw&&PROFILE_KEYS.indexOf(raw.activeProfile)!==-1?raw.activeProfile:'irka',
-    profiles:{irka:payloadForState(normalizeProfile(profiles.irka||(raw&&raw.goal!==undefined?raw:null))),
-      mirko:payloadForState(normalizeProfile(profiles.mirko))}};
-}
-function mergeTrackerData(localData,accountData){
-  var local=trackerData(localData),account=trackerData(accountData),merged={v:1,activeProfile:accountData?account.activeProfile:local.activeProfile,profiles:{}};
-  PROFILE_KEYS.forEach(function(key){
-    var localProfile=local.profiles[key],accountProfile=account.profiles[key],entries={};
-    localProfile.entries.forEach(function(entry){entries[entry.d]=Object.assign({},entry)});
-    accountProfile.entries.forEach(function(entry){entries[entry.d]=Object.assign({},entry)});
-    merged.profiles[key]={
-      goal:{weight:accountProfile.goal.weight!=null?accountProfile.goal.weight:localProfile.goal.weight,
-        date:accountProfile.goal.date||localProfile.goal.date},
-      start:accountProfile.start?Object.assign({},accountProfile.start):localProfile.start?Object.assign({},localProfile.start):null,
-      entries:Object.keys(entries).sort().map(function(date){return entries[date]})
-    };
-  });
-  return merged;
 }
 async function apiRequest(url,options){
   options=options||{};
@@ -400,9 +401,10 @@ async function apiRequest(url,options){
   return result;
 }
 function persist(){
+  if(!currentUser||!currentUser.profileKey)return;
   stateProfiles[activeProfile]=normalizeProfile(S);
-  var data=persistProfiles(),storageKey=currentUser?accountStorageKey(currentUser.email):LS;
-  lsWrite(storageKey,data);
+  var data=persistProfiles(),storageKey=accountStorageKey(currentUser.email);
+  lsWrite(storageKey,localSnapshot());
   if(mode==='cloud'&&currentUser){
     pending++;syncError='';renderNote();
     saving=saving.then(async function(){
@@ -418,56 +420,84 @@ function renderNote(){
       :'Записите се пазят само в този браузър. Влез или се регистрирай, за да ги синхронизираш.');
 }
 function renderAccount(){
-  $('accountStatus').textContent=authInitializing?'Проверка на акаунта…':currentUser
-    ?'Влязъл си като '+currentUser.email+'. '+(mode==='cloud'?'Данните се синхронизират с акаунта ти.':'Синхронизацията временно не е налична.')
-    :'Използваш приложението като гост. Данните се пазят локално в този браузър.';
-  $('authForm').hidden=authInitializing||!!currentUser;
+  $('authPage').hidden=!!(currentUser&&currentUser.profileKey);
+  $('appPage').hidden=!currentUser||!currentUser.profileKey;
   $('accountActions').hidden=authInitializing||!currentUser;
-  $('authForm').querySelectorAll('button').forEach(function(button){button.disabled=authBusy});
-  $('logoutBtn').disabled=authBusy;
+  $('logoutBtn').disabled=authBusy||authInitializing;
+  $('authForm').hidden=!!(currentUser&&!currentUser.profileKey);
+  $('profileSetupForm').hidden=!currentUser||!!currentUser.profileKey;
+  $('authSubmit').textContent=authMode==='login'?'Вход':'Регистрация';
+  $('authModeToggle').textContent=authMode==='login'?'Регистрация':'Вход';
+  $('authFormTitle').textContent=authMode==='login'?'Вход':'Регистрация';
+  $('registerNameWrap').hidden=authMode!=='register';
+  $('registerName').required=authMode==='register';
+  $('authPassword').autocomplete=authMode==='register'?'new-password':'current-password';
+  $('profileSetupForm').querySelectorAll('button,input').forEach(function(control){control.disabled=authBusy||authInitializing});
+  $('authForm').querySelectorAll('button,input').forEach(function(control){control.disabled=authBusy||authInitializing});
   var message=$('accountMessage');
   message.textContent=authError;
   message.className='account-message'+(authError?' err':'');
 }
 function startLocal(message){
-  currentUser=null;mode='local';restoreProfiles(lsRead(LS));loaded=true;
-  authInitializing=false;authError=message||'';renderAll();
+  currentUser=null;mode='local';loaded=false;authInitializing=false;
+  stateProfiles={irka:makeEmptyProfile(),mirko:makeEmptyProfile()};
+  activeProfile='irka';S=stateProfiles[activeProfile];
+  otherSummary=null;participantsPresent={irka:false,mirko:false};
+  profileNames={irka:'Участник 1',mirko:'Участник 2'};
+  authError=message||'';authMode='login';renderAccount();
 }
 function startAccountFallback(user,error){
   currentUser=user;mode='local';
-  restoreProfiles(mergeTrackerData(lsRead(LS),lsRead(accountStorageKey(user.email))));
+  profileNames[user.profileKey]=user.displayName;
+  participantsPresent[user.profileKey]=true;
+  stateProfiles={irka:makeEmptyProfile(),mirko:makeEmptyProfile()};
+  otherSummary=null;
+  var cached=lsRead(accountStorageKey(user.email));
+  if(cached){
+    restoreProfiles(cached.data||cached);
+    otherSummary=cached.summary||null;
+    participantsPresent=cached.participants||participantsPresent;
+  }
+  PROFILE_KEYS.forEach(function(key){
+    if(key!==user.profileKey)stateProfiles[key]=makeEmptyProfile();
+  });
+  activeProfile=user.profileKey;S=stateProfiles[activeProfile];
   loaded=true;authInitializing=false;authError='Входът е успешен, но синхронизацията временно не е налична: '+error.message;
   syncError=error.message;renderAll();
 }
 async function activateAccount(user){
+  if(!user.profileKey){currentUser=user;authInitializing=false;authError='';renderAccount();return false}
   currentUser=user;mode='cloud';
-  var key=accountStorageKey(user.email),guestData=lsRead(LS),cachedData=lsRead(key);
-  var localData=mergeTrackerData(guestData,cachedData);
-  var response=await apiRequest('/api/data'),remoteData=response.data;
-  var mergedData=mergeTrackerData(localData,remoteData);
-  restoreProfiles(mergedData);loaded=true;
-  lsWrite(key,mergedData);
-  if(remoteData&&JSON.stringify(trackerData(remoteData))!==JSON.stringify(mergedData)){
-    await apiRequest('/api/data',{method:'PUT',body:JSON.stringify(mergedData)});
-  }else if(!remoteData&&(guestData||cachedData)){
-    await apiRequest('/api/data',{method:'PUT',body:JSON.stringify(mergedData)});
-  }
-  if(guestData){
-    try{localStorage.removeItem(LS)}catch(error){console.error('Неуспешно изчистване на копието за гост:',error)}
-  }
-  syncError='';
+  var response=await apiRequest('/api/data');
+  restoreProfiles(response.data);
+  response.participants.forEach(function(participant){
+    if(PROFILE_KEYS.indexOf(participant.profileKey)!==-1){
+      profileNames[participant.profileKey]=participant.displayName;
+      participantsPresent[participant.profileKey]=true;
+    }
+  });
+  otherSummary=response.summary;
+  activeProfile=user.profileKey;S=stateProfiles[activeProfile];
+  loaded=true;authInitializing=false;authError='';syncError='';
+  lsWrite(accountStorageKey(user.email),localSnapshot());
+  return true;
+}
+function showProfileSetup(user){
+  currentUser=user;authInitializing=false;authError='';
+  renderAccount();
 }
 async function init(){
-  renderAll();
+  renderAccount();
   try{
     var session=await apiRequest('/api/auth/session');
     if(session.user){
+      if(!session.user.profileKey){showProfileSetup(session.user);return}
       try{await activateAccount(session.user);renderAll()}
       catch(error){console.error('Неуспешно зареждане на акаунта:',error);startAccountFallback(session.user,error)}
     }else startLocal();
   }catch(error){
     console.error('Неуспешна проверка на сесията:',error);
-    startLocal('Връзката със сървъра не е налична. Данните се показват от този браузър.');
+    startLocal('Връзката със сървъра не е налична. Опитай отново, когато връзката се възстанови.');
   }
 }
 
@@ -477,13 +507,8 @@ function lossGoal(D,es){return !(D.goal.weight!=null&&es.length&&D.goal.weight>e
 function renderHead(){
   var D=cur(),es=sorted(all(D)),el=$('meta');
   if(!loaded){el.innerHTML='';return}
-  var profilePill='<span class="pill">'+profileLabel(activeProfile)+'</span>';
-  if(!es.length){el.innerHTML=profilePill+'<span class="pill">Отчитане веднъж седмично</span>';return}
-  var t=ds(today()),wk=Math.floor(Math.max(0,between(es[0].d,t))/7)+1,l=es[es.length-1],since=between(l.d,t);
-  var next=ds(addDays(pd(l.d),7)),due=since>=7;
-  el.innerHTML=profilePill+'<span class="pill">Седмица '+wk+'</span>'+
-    (due?'<span class="pill due">Време е за седмично отчитане</span>'
-        :'<span class="pill">Следващо отчитане: '+fd(next)+' ('+(7-Math.max(since,0))+' дн.)</span>');
+  var latest=es.length?es[es.length-1]:null;
+  el.innerHTML=latest?'<span class="pill">Последен запис: '+fd(latest.d,true)+'</span>':'';
 }
 
 function renderProgress(){
@@ -491,7 +516,7 @@ function renderProgress(){
   if(!loaded){el.innerHTML='<p class="muted">Зареждане на записите…</p>';return}
   if(!es.length){
     el.innerHTML='<div class="hero-empty"><div class="tape" aria-hidden="true"></div>'+
-      '<p class="muted">Още няма записи. Въведи началните си килограми и мерки в панела „Начало“, после добавяй седмичните отчитания и тук ще се появи напредъкът към целта.</p>'+
+      '<p class="muted">Още няма записи. Въведи началните си килограми и мерки, после записвай теглото си всеки ден. В петък добавяй и мерките си.</p>'+
       '<button class="btn alt" type="button" data-act="demo">Виж с примерни данни</button></div>';
     return;
   }
@@ -532,6 +557,41 @@ function renderProgress(){
   });
   if(ms)html+='<div class="measures">'+ms+'</div>';
   el.innerHTML=html;
+}
+
+function renderSummary(){
+  var section=$('summary'),isOther=currentUser&&activeProfile!==currentUser.profileKey;
+  section.hidden=!isOther;
+  $('prog').hidden=!!isOther;
+  document.querySelector('.side').hidden=!!isOther;
+  document.querySelector('.chart').hidden=!!isOther;
+  $('hist').hidden=!!isOther||!loaded;
+  if(!isOther)return;
+  if(!participantsPresent[activeProfile]){
+    section.innerHTML='<h2>Обобщение · '+esc(profileLabel(activeProfile))+'</h2>'+
+      '<p class="muted">Този таб ще се появи, когато другият участник се регистрира.</p>';
+    return;
+  }
+  var summary=otherSummary||{},start=summary.start,goal=summary.goal||{};
+  var metric=function(label,value,unit){
+    return '<div class="tile"><div class="lab">'+label+'</div><div class="mv">'+(value==null?'—':nf(value)+' '+unit)+'</div></div>';
+  };
+  var startInfo=start
+    ?metric('Начално тегло',start.w,'кг')+metric('Гръдна обиколка',start.c,'см')+
+      metric('Талия',start.wa,'см')+metric('Ханш',start.h,'см')
+    :'<p class="muted">Началните килограми и мерки още не са въведени.</p>';
+  var currentInfo=summary.todayWeight!=null
+    ?'<div class="big">'+nf(summary.todayWeight)+'<small>кг</small></div><p class="sub">Отчетено днес</p>'
+    :'<p class="muted">Няма отчетено тегло днес.</p>'+
+      (summary.latestWeight!=null?'<p class="sub">Последно: '+nf(summary.latestWeight)+' кг · '+fd(summary.latestDate,true)+'</p>':'');
+  var goalInfo=goal.weight==null
+    ?'<p class="muted">Крайната цел още не е зададена.</p>'
+    :'<div class="big">'+nf(goal.weight)+'<small>кг</small></div>'+
+      (goal.date?'<p class="sub">До '+fd(goal.date,true)+'</p>':'');
+  section.innerHTML='<h2>Обобщение · '+esc(profileLabel(activeProfile))+'</h2>'+
+    '<div><h3 class="lab">Начални килограми и мерки</h3><div class="tiles">'+startInfo+'</div></div>'+
+    '<div><h3 class="lab">Тегло днес</h3>'+currentInfo+'</div>'+
+    '<div><h3 class="lab">Крайна цел</h3>'+goalInfo+'</div>';
 }
 
 var lastW=0;
@@ -583,10 +643,10 @@ function renderTable(){
   var D=cur(),es=sorted(all(D)),sec=$('hist');
   if(!loaded||!es.length){sec.hidden=true;return}
   sec.hidden=false;
-  var loss=lossGoal(D,es),f=es[0],html='';
+  var loss=lossGoal(D,es),html='';
   for(var i=es.length-1;i>=0;i--){
-    var e=es[i],hasStart=!!D.start,wk=hasStart?Math.max(1,Math.floor(between(f.d,e.d)/7)):Math.floor(between(f.d,e.d)/7)+1;
-    html+='<tr><td class="wk">'+(e.s?'Старт':wk)+'</td><td>'+fd(e.d,true)+(e.n?'<span class="note">'+esc(e.n)+'</span>':'')+'</td>';
+    var e=es[i];
+    html+='<tr><td class="wk">'+(es.length-i)+'</td><td>'+fd(e.d,true)+(e.n?'<span class="note">'+esc(e.n)+'</span>':'')+'</td>';
     FIELDS.forEach(function(F){
       if(e[F.k]==null){html+='<td class="num muted">—</td>';return}
       var prev=null;for(var j=i-1;j>=0;j--){if(es[j][F.k]!=null){prev=es[j];break}}
@@ -612,14 +672,14 @@ function renderForm(){
     inp.placeholder=last!=null?nf(last):ex;
   });
   $('f-date').max=ds(today());
-  $('formTitle').textContent=editing?'Промяна на отчитане':'Седмично отчитане';
+  $('formTitle').textContent=editing?'Промяна на отчитане':'Дневно отчитане';
   $('saveBtn').textContent=editing?'Обнови отчитането':'Запази отчитането';
   $('cancelEdit').hidden=!editing;
 }
 function renderAll(){
   $('demoBar').hidden=!demo;
   syncProfileTabs();
-  renderHead();renderProgress();renderChart();renderTable();renderForm();renderNote();renderAccount();
+  renderHead();renderProgress();renderChart();renderTable();renderForm();renderSummary();renderNote();renderAccount();
 }
 
 /* ---------- actions ---------- */
@@ -634,20 +694,41 @@ $('authForm').addEventListener('submit',async function(ev){
   ev.preventDefault();
   if(authBusy)return;
   if(!this.checkValidity()){this.reportValidity();return}
-  var action=ev.submitter&&ev.submitter.dataset.authAction;
-  if(action!=='login'&&action!=='register')return;
+  var action=authMode;
   authBusy=true;authError='';renderAccount();
   try{
+    var credentials={email:$('authEmail').value,password:$('authPassword').value};
+    if(action==='register')credentials.displayName=$('registerName').value;
     var result=await apiRequest('/api/auth/'+action,{method:'POST',body:JSON.stringify({
-      email:$('authEmail').value,password:$('authPassword').value
+      email:credentials.email,password:credentials.password,displayName:credentials.displayName
     })});
-    await activateAccount(result.user);
-    $('authForm').reset();authError='';renderAll();
+    if(await activateAccount(result.user)){
+      $('authForm').reset();authMode='login';authError='';renderAll();
+    }
   }catch(error){
     console.error('Неуспешно удостоверяване или синхронизиране:',error);
     if(currentUser){
       $('authForm').reset();startAccountFallback(currentUser,error);
     }else startLocal(error.message);
+  }finally{authBusy=false;renderAccount()}
+});
+
+$('authModeToggle').addEventListener('click',function(){
+  authMode=authMode==='login'?'register':'login';authError='';renderAccount();
+});
+
+$('profileSetupForm').addEventListener('submit',async function(ev){
+  ev.preventDefault();
+  if(authBusy||!this.reportValidity())return;
+  authBusy=true;authError='';renderAccount();
+  try{
+    var result=await apiRequest('/api/auth/profile',{method:'POST',body:JSON.stringify({
+      displayName:$('profileSetupName').value
+    })});
+    if(await activateAccount(result.user)){this.reset();renderAll()}
+  }catch(error){
+    console.error('Неуспешна настройка на профила:',error);
+    authError=error.message;
   }finally{authBusy=false;renderAccount()}
 });
 
@@ -659,7 +740,8 @@ $('logoutBtn').addEventListener('click',async function(){
     await apiRequest('/api/auth/logout',{method:'POST'});
     startLocal();
   }catch(error){
-    console.error('Неуспешен изход:',error);setAuthError(error.message);
+    console.error('Неуспешен изход:',error);
+    authError=error.message;renderAccount();
   }finally{authBusy=false;renderAccount()}
 });
 
