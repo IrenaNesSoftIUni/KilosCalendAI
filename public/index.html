@@ -163,7 +163,16 @@ input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline
 .row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .msg{min-height:1.4em;font-size:.88rem}
 .msg.err{color:var(--bad)} .msg.ok{color:var(--good)}
+#pwPanel summary{cursor:pointer}
 .storenote{font-size:.8rem;color:var(--ink2);padding-inline:4px}
+.pw{position:relative;min-width:0}
+.pw input{padding-right:52px}
+.eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:40px;height:36px;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;color:var(--ink2);cursor:pointer}
+.eye:hover{color:var(--ink);background:var(--line)}
+.eye svg{width:20px;height:20px}
+.eye .off{display:none}.eye[aria-pressed="true"] .on{display:none}.eye[aria-pressed="true"] .off{display:block}
+.forgot-link{justify-self:start;padding-left:0}
+.code-input{font-family:var(--f-mono);letter-spacing:.12em;text-transform:uppercase}
 .auth-page{max-width:480px;margin:8vh auto;padding:24px;display:grid;gap:20px}
 .auth-page[hidden],#appPage[hidden]{display:none}
 .auth-page h1{font-size:clamp(1.6rem,6vw,2.2rem)}
@@ -187,7 +196,24 @@ input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline
       <button class="btn" type="submit" id="authSubmit">Вход</button>
       <button class="btn alt" type="button" id="authModeToggle">Регистрация</button>
     </div>
+    <button class="lnk forgot-link" type="button" id="forgotLink">Забравена парола?</button>
     <p class="account-message" id="accountMessage" role="status" aria-live="polite"></p>
+  </form>
+  <form class="account" id="forgotForm" novalidate hidden>
+    <h2>Забравена парола</h2>
+    <div id="forgotStep1" class="account-form">
+      <p class="muted">Въведи имейла на акаунта. Ще получиш еднократен код, валиден 30 минути. Кодът се показва в прозореца на Terminal, в който работи сървърът.</p>
+      <div class="f"><label for="forgotEmail">Имейл</label><input id="forgotEmail" type="email" autocomplete="email" maxlength="254"></div>
+      <div class="account-buttons"><button class="btn" type="button" id="forgotSend">Получи код</button></div>
+    </div>
+    <div id="forgotStep2" class="account-form" hidden>
+      <div class="f"><label for="resetCode">Код</label><input id="resetCode" class="code-input" type="text" autocomplete="one-time-code" maxlength="9" placeholder="XXXX-XXXX"></div>
+      <div class="f"><label for="resetPassword">Нова парола</label><input id="resetPassword" type="password" autocomplete="new-password" minlength="12" maxlength="72"></div>
+      <p class="muted">Поне 12 символа.</p>
+      <div class="account-buttons"><button class="btn" type="submit">Смени паролата и влез</button><button class="lnk" type="button" id="forgotResend">Нов код</button></div>
+    </div>
+    <p class="account-message" id="forgotMessage" role="status" aria-live="polite"></p>
+    <button class="lnk forgot-link" type="button" id="forgotBack">← Назад към вход</button>
   </form>
   <form class="account" id="profileSetupForm" hidden>
     <h2>Настрой своя таб</h2>
@@ -259,6 +285,15 @@ input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline
       <p class="msg" id="gmsg" role="status"></p>
       <div class="row"><button class="btn alt" type="submit">Запази целта</button></div>
     </form>
+    <details class="panel" id="pwPanel">
+      <summary><h2 style="display:inline">Смяна на парола</h2></summary>
+      <form id="f-password" class="grid6" novalidate autocomplete="off" style="margin-top:14px">
+        <div class="f s6"><label for="pw-cur">Текуща парола</label><input id="pw-cur" type="password" autocomplete="current-password" maxlength="72"></div>
+        <div class="f s6"><label for="pw-new">Нова парола</label><input id="pw-new" type="password" autocomplete="new-password" minlength="12" maxlength="72"></div>
+        <p class="msg s6" id="pwmsg" role="status"></p>
+        <div class="row s6"><button class="btn alt" type="submit">Смени паролата</button></div>
+      </form>
+    </details>
     <p class="storenote" id="storeNote"></p>
   </aside>
 
@@ -379,8 +414,8 @@ function persistProfiles(){
   return out;
 }
 function accountStorageKey(email){return LS+':account:'+encodeURIComponent(email.toLowerCase())}
-function localSnapshot(){
-  return {data:persistProfiles(),summary:otherSummary,participants:participantsPresent};
+function localSnapshot(unsynced){
+  return {data:persistProfiles(),summary:otherSummary,participants:participantsPresent,unsynced:!!unsynced};
 }
 function lsWrite(key,data){
   try{localStorage.setItem(key,JSON.stringify(data));localError='';return true}
@@ -404,15 +439,19 @@ function persist(){
   if(!currentUser||!currentUser.profileKey)return;
   stateProfiles[activeProfile]=normalizeProfile(S);
   var data=persistProfiles(),storageKey=accountStorageKey(currentUser.email);
-  lsWrite(storageKey,localSnapshot());
-  if(mode==='cloud'&&currentUser){
-    pending++;syncError='';renderNote();
-    saving=saving.then(async function(){
-      await apiRequest('/api/data',{method:'PUT',body:JSON.stringify(data)});
-    }).catch(function(error){
-      console.error('Неуспешна синхронизация:',error);syncError=error.message;renderNote();
-    }).then(function(){pending--;renderNote()});
-  }
+  // Mark the local copy as not yet on the server until the PUT succeeds, so a
+  // change made while the server is unreachable is pushed on the next login.
+  lsWrite(storageKey,localSnapshot(true));
+  pending++;syncError='';renderNote();
+  saving=saving.then(async function(){
+    await apiRequest('/api/data',{method:'PUT',body:JSON.stringify(data)});
+    mode='cloud';
+    lsWrite(storageKey,localSnapshot(false));
+  }).catch(function(error){
+    console.error('Неуспешна синхронизация:',error);
+    syncError='Промените са запазени само в този браузър и ще се синхронизират при следващо влизане: '+error.message;
+    renderNote();
+  }).then(function(){pending--;renderNote()});
 }
 function renderNote(){
   $('storeNote').textContent=!loaded?'':localError||syncError||(
@@ -424,7 +463,9 @@ function renderAccount(){
   $('appPage').hidden=!currentUser||!currentUser.profileKey;
   $('accountActions').hidden=authInitializing||!currentUser;
   $('logoutBtn').disabled=authBusy||authInitializing;
-  $('authForm').hidden=!!(currentUser&&!currentUser.profileKey);
+  $('authForm').hidden=!!(currentUser&&!currentUser.profileKey)||authMode==='forgot';
+  $('forgotForm').hidden=authMode!=='forgot'||!!currentUser;
+  $('forgotLink').hidden=authMode!=='login';
   $('profileSetupForm').hidden=!currentUser||!!currentUser.profileKey;
   $('authSubmit').textContent=authMode==='login'?'Вход':'Регистрация';
   $('authModeToggle').textContent=authMode==='login'?'Регистрация':'Вход';
@@ -468,6 +509,13 @@ function startAccountFallback(user,error){
 async function activateAccount(user){
   if(!user.profileKey){currentUser=user;authInitializing=false;authError='';renderAccount();return false}
   currentUser=user;mode='cloud';
+  var cached=lsRead(accountStorageKey(user.email));
+  if(cached&&cached.unsynced&&cached.data&&cached.data.profiles&&cached.data.profiles[user.profileKey]){
+    var push={v:1,activeProfile:user.profileKey,profiles:{irka:makeEmptyProfile(),mirko:makeEmptyProfile()}};
+    push.profiles[user.profileKey]=normalizeProfile(cached.data.profiles[user.profileKey]);
+    try{await apiRequest('/api/data',{method:'PUT',body:JSON.stringify(push)})}
+    catch(error){console.error('Неуспешно качване на локалните промени:',error);throw error}
+  }
   var response=await apiRequest('/api/data');
   restoreProfiles(response.data);
   response.participants.forEach(function(participant){
@@ -717,6 +765,61 @@ $('authModeToggle').addEventListener('click',function(){
   authMode=authMode==='login'?'register':'login';authError='';renderAccount();
 });
 
+/* ---------- forgotten password ---------- */
+function forgotMsg(text,cls){var m=$('forgotMessage');m.textContent=text||'';m.className='account-message'+(cls?' '+cls:'')}
+function forgotStep(n){$('forgotStep1').hidden=n!==1;$('forgotStep2').hidden=n!==2}
+$('forgotLink').addEventListener('click',function(){
+  authMode='forgot';authError='';$('forgotEmail').value=$('authEmail').value;forgotStep(1);forgotMsg('');renderAccount();$('forgotEmail').focus();
+});
+$('forgotBack').addEventListener('click',function(){
+  authMode='login';$('authEmail').value=$('forgotEmail').value;$('forgotForm').reset();forgotMsg('');renderAccount();
+});
+async function requestResetCode(){
+  var email=$('forgotEmail').value.trim();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return forgotMsg('Въведи валиден имейл адрес.','err');
+  try{
+    var r=await apiRequest('/api/auth/forgot',{method:'POST',body:JSON.stringify({email:email})});
+    forgotStep(2);forgotMsg(r.message,'ok');$('resetCode').focus();
+  }catch(error){forgotMsg(error.message,'err')}
+}
+$('forgotSend').addEventListener('click',requestResetCode);
+$('forgotResend').addEventListener('click',requestResetCode);
+$('forgotForm').addEventListener('submit',async function(ev){
+  ev.preventDefault();
+  if($('forgotStep2').hidden)return requestResetCode();
+  var code=$('resetCode').value.trim(),pw=$('resetPassword').value;
+  if(!code)return forgotMsg('Въведи кода.','err');
+  if(pw.length<12)return forgotMsg('Новата парола трябва да е поне 12 символа.','err');
+  try{
+    var result=await apiRequest('/api/auth/reset',{method:'POST',body:JSON.stringify({email:$('forgotEmail').value.trim(),code:code,newPassword:pw})});
+    this.reset();forgotStep(1);forgotMsg('');authMode='login';
+    if(await activateAccount(result.user))renderAll();
+  }catch(error){forgotMsg(error.message,'err')}
+});
+
+/* ---------- show / hide password ---------- */
+Array.prototype.forEach.call(document.querySelectorAll('input[type="password"]'),function(input){
+  var wrap=document.createElement('div');wrap.className='pw';
+  input.parentNode.insertBefore(wrap,input);wrap.appendChild(input);
+  var btn=document.createElement('button');
+  btn.type='button';btn.className='eye';btn.setAttribute('aria-pressed','false');btn.setAttribute('aria-label','Покажи паролата');btn.title='Покажи паролата';
+  btn.innerHTML='<svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>'+
+    '<svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6C3.9 8.3 2 12 2 12s3.6 7 10 7a9.8 9.8 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+  btn.addEventListener('click',function(){
+    var show=input.type==='password';
+    input.type=show?'text':'password';
+    btn.setAttribute('aria-pressed',show?'true':'false');
+    var label=show?'Скрий паролата':'Покажи паролата';btn.setAttribute('aria-label',label);btn.title=label;
+    input.focus();
+  });
+  wrap.appendChild(btn);
+});
+// Hide every revealed password again after a form is submitted.
+document.addEventListener('submit',function(){
+  Array.prototype.forEach.call(document.querySelectorAll('.pw input'),function(i){i.type='password'});
+  Array.prototype.forEach.call(document.querySelectorAll('.eye'),function(b){b.setAttribute('aria-pressed','false');b.setAttribute('aria-label','Покажи паролата');b.title='Покажи паролата'});
+},true);
+
 $('profileSetupForm').addEventListener('submit',async function(ev){
   ev.preventDefault();
   if(authBusy||!this.reportValidity())return;
@@ -773,7 +876,7 @@ $('f-goal').addEventListener('submit',function(ev){
   var w=pn($('g-w').value),d=$('g-d').value||null;
   if(w===null){S.goal={weight:null,date:null};if(demo)demo=false;dirty.g=false;persist();renderAll();$('g-d').value='';return setMsg('gmsg','Целта е изчистена.','ok')}
   if(Number.isNaN(w)||w<20||w>400)return setMsg('gmsg','Въведи целево тегло между 20 и 400 кг.','err');
-  if(d&&d<=ds(today()))return setMsg('gmsg','Датата за целта трябва да е в бъдещето.','err');
+  if(d&&d<=ds(today())&&d!==S.goal.date)return setMsg('gmsg','Датата за целта трябва да е в бъдещето.','err');
   if(demo)demo=false;
   S.goal={weight:w,date:d};dirty.g=false;persist();renderAll();
   setMsg('gmsg','Целта е запазена.','ok');
@@ -800,6 +903,16 @@ $('f-start').addEventListener('submit',function(ev){
   setMsg('smsg','Началото е запазено.','ok');
 });
 $('f-start').addEventListener('input',function(){dirty.s=true});
+$('f-password').addEventListener('submit',async function(ev){
+  ev.preventDefault();
+  var cur=$('pw-cur').value,nw=$('pw-new').value;
+  if(!cur)return setMsg('pwmsg','Въведи текущата парола.','err');
+  if(nw.length<12)return setMsg('pwmsg','Новата парола трябва да е поне 12 символа.','err');
+  try{
+    await apiRequest('/api/auth/password',{method:'POST',body:JSON.stringify({currentPassword:cur,newPassword:nw})});
+    this.reset();setMsg('pwmsg','Паролата е сменена. Другите устройства са излезли от акаунта.','ok');
+  }catch(error){setMsg('pwmsg',error.message,'err')}
+});
 $('f-goal').addEventListener('input',function(){dirty.g=true});
 
 document.addEventListener('click',function(ev){
