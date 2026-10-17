@@ -8,12 +8,16 @@ const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
+const crypto = require('node:crypto');
 const { rateLimit } = require('express-rate-limit');
 
 const sessionSecret = process.env.SESSION_SECRET;
 if (!sessionSecret || sessionSecret.length < 32) {
   throw new Error('SESSION_SECRET must be configured with at least 32 characters.');
 }
+
+const allowedEmails = new Set((process.env.ALLOWED_EMAILS || '')
+  .split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
 
 const databasePath = path.resolve(process.env.DATABASE_PATH || './data/tracker.sqlite');
 fs.mkdirSync(path.dirname(databasePath), { recursive: true });
@@ -41,6 +45,12 @@ db.exec(`
     expires_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);
+  CREATE TABLE IF NOT EXISTS password_resets (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0
+  );
   CREATE TABLE IF NOT EXISTS competition_data (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     data TEXT NOT NULL,
@@ -100,11 +110,44 @@ class SqliteSessionStore extends session.Store {
   }
 }
 
+function purgeExpiredSessions() {
+  try {
+    db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now());
+    db.prepare('DELETE FROM password_resets WHERE expires_at <= ?').run(Date.now());
+  } catch (error) {
+    console.error('Неуспешно почистване на изтекли сесии:', error);
+  }
+}
+purgeExpiredSessions();
+setInterval(purgeExpiredSessions, 60 * 60 * 1000).unref();
+
+// Used when the e-mail is unknown so failed logins take the same time either way.
+const dummyPasswordHash = bcrypt.hashSync('timing-equalizer-not-a-real-password', 12);
+
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 
 app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src https://fonts.gstatic.com",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'self'"
+  ].join('; '));
+  if (isProduction) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 app.use(express.json({ limit: '2mb' }));
 app.use(session({
   name: 'kilos.sid',
@@ -159,13 +202,16 @@ function validateMeasurement(value, allowNote) {
   return true;
 }
 
-function validateProfile(value) {
+function validateProfile(value, previous) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const goal = value.goal;
   if (!goal || typeof goal !== 'object' || Array.isArray(goal)) return false;
   if (goal.weight !== null && goal.weight !== undefined && !validNumber(goal.weight, 20, 400)) return false;
+  // A new goal date must lie in the future, but a goal date that was already saved
+  // stays valid after it passes, otherwise every later save would be rejected.
+  const unchangedGoalDate = previous && previous.goal && previous.goal.date === goal.date;
   if (goal.date !== null && goal.date !== undefined
-    && (!validDate(goal.date) || goal.date <= todayInBulgaria())) return false;
+    && (!validDate(goal.date) || (goal.date <= todayInBulgaria() && !unchangedGoalDate))) return false;
   if (value.start !== null && value.start !== undefined && !validateMeasurement(value.start, false)) return false;
   if (!Array.isArray(value.entries) || value.entries.length > 5000) return false;
   const dates = new Set();
@@ -176,11 +222,11 @@ function validateProfile(value) {
   return true;
 }
 
-function validateTrackerData(value) {
+function validateTrackerData(value, previousProfiles) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   if (!['irka', 'mirko'].includes(value.activeProfile)) return false;
   if (!value.profiles || typeof value.profiles !== 'object' || Array.isArray(value.profiles)) return false;
-  return ['irka', 'mirko'].every((key) => validateProfile(value.profiles[key]));
+  return ['irka', 'mirko'].every((key) => validateProfile(value.profiles[key], previousProfiles && previousProfiles[key]));
 }
 
 function emptyTrackerData() {
@@ -284,6 +330,10 @@ app.post('/api/auth/register', authRateLimit, async (req, res, next) => {
       return res.status(400).json({ error: 'Паролата трябва да е поне 12 символа и до 72 байта.' });
     }
 
+    if (allowedEmails.size && !allowedEmails.has(email)) {
+      return res.status(403).json({ error: 'Регистрацията е разрешена само за поканените участници.' });
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
     let user;
     try {
@@ -326,7 +376,8 @@ app.post('/api/auth/login', authRateLimit, async (req, res, next) => {
     const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const password = typeof req.body.password === 'string' ? req.body.password : '';
     const user = db.prepare('SELECT id, email, password_hash, display_name, profile_key FROM users WHERE email = ?').get(email);
-    if (!user || !await bcrypt.compare(password, user.password_hash)) {
+    const passwordMatches = await bcrypt.compare(password, user ? user.password_hash : dummyPasswordHash);
+    if (!user || !passwordMatches) {
       return res.status(401).json({ error: 'Имейлът или паролата са неправилни.' });
     }
     establishSession(req, user, 200, res, next);
@@ -367,6 +418,108 @@ app.post('/api/auth/profile', requireUser, (req, res, next) => {
   }
 });
 
+app.post('/api/auth/password', authRateLimit, requireUser, async (req, res, next) => {
+  try {
+    const currentPassword = req.body && typeof req.body.currentPassword === 'string' ? req.body.currentPassword : '';
+    const newPassword = req.body && typeof req.body.newPassword === 'string' ? req.body.newPassword : '';
+    if (newPassword.length < 12 || Buffer.byteLength(newPassword, 'utf8') > 72) {
+      return res.status(400).json({ error: 'Новата парола трябва да е поне 12 символа и до 72 байта.' });
+    }
+    const user = db.prepare('SELECT id, email, password_hash, display_name, profile_key FROM users WHERE id = ?')
+      .get(req.session.userId);
+    if (!user || !await bcrypt.compare(currentPassword, user.password_hash)) {
+      return res.status(401).json({ error: 'Текущата парола е неправилна.' });
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    db.transaction(() => {
+      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, user.id);
+      // Sign out every other device that was logged in with the old password.
+      db.prepare("DELETE FROM sessions WHERE json_extract(session, '$.userId') = ?").run(user.id);
+    })();
+    establishSession(req, user, 200, res, next);
+  } catch (error) {
+    next(error);
+  }
+});
+
+const RESET_CODE_TTL_MS = 30 * 60 * 1000;
+const RESET_MAX_ATTEMPTS = 5;
+function hashResetCode(code) {
+  return crypto.createHash('sha256').update(code).digest('hex');
+}
+function newResetCode() {
+  // 8 characters without look-alikes (0/O, 1/I/L), shown as XXXX-XXXX.
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 8; i += 1) code += alphabet[crypto.randomInt(alphabet.length)];
+  return code;
+}
+function normalizeResetCode(value) {
+  return typeof value === 'string' ? value.toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
+}
+
+// Step 1: ask for a one-time code. There is no e-mail service, so the code is
+// printed in the terminal where the server runs — only whoever runs the server
+// can read it and pass it on.
+app.post('/api/auth/forgot', authRateLimit, (req, res, next) => {
+  try {
+    const email = req.body && typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const user = email ? db.prepare('SELECT id, email FROM users WHERE email = ?').get(email) : null;
+    if (user) {
+      const code = newResetCode();
+      db.prepare(`
+        INSERT INTO password_resets (user_id, code_hash, expires_at, attempts) VALUES (?, ?, ?, 0)
+        ON CONFLICT(user_id) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0
+      `).run(user.id, hashResetCode(code), Date.now() + RESET_CODE_TTL_MS);
+      const shown = `${code.slice(0, 4)}-${code.slice(4)}`;
+      console.log([
+        '',
+        '==================== ЗАБРАВЕНА ПАРОЛА ====================',
+        `  Акаунт: ${user.email}`,
+        `  Еднократен код: ${shown}   (валиден 30 минути)`,
+        '==========================================================',
+        ''
+      ].join('\n'));
+    }
+    // Same answer whether or not the e-mail exists.
+    res.json({ ok: true, message: 'Ако има акаунт с този имейл, кодът за смяна е показан в прозореца, в който работи сървърът.' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Step 2: use the code to set a new password.
+app.post('/api/auth/reset', authRateLimit, async (req, res, next) => {
+  try {
+    const email = req.body && typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const code = normalizeResetCode(req.body && req.body.code);
+    const newPassword = req.body && typeof req.body.newPassword === 'string' ? req.body.newPassword : '';
+    if (newPassword.length < 12 || Buffer.byteLength(newPassword, 'utf8') > 72) {
+      return res.status(400).json({ error: 'Новата парола трябва да е поне 12 символа и до 72 байта.' });
+    }
+    const invalid = () => res.status(400).json({ error: 'Кодът е невалиден или е изтекъл. Поискай нов код.' });
+    const user = email ? db.prepare('SELECT id, email, display_name, profile_key FROM users WHERE email = ?').get(email) : null;
+    if (!user || !code) return invalid();
+    const reset = db.prepare('SELECT code_hash, expires_at, attempts FROM password_resets WHERE user_id = ?').get(user.id);
+    if (!reset || reset.expires_at <= Date.now() || reset.attempts >= RESET_MAX_ATTEMPTS) return invalid();
+    const given = Buffer.from(hashResetCode(code), 'hex');
+    const expected = Buffer.from(reset.code_hash, 'hex');
+    if (!crypto.timingSafeEqual(given, expected)) {
+      db.prepare('UPDATE password_resets SET attempts = attempts + 1 WHERE user_id = ?').run(user.id);
+      return invalid();
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    db.transaction(() => {
+      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, user.id);
+      db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(user.id);
+      db.prepare("DELETE FROM sessions WHERE json_extract(session, '$.userId') = ?").run(user.id);
+    })();
+    establishSession(req, user, 200, res, next);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/auth/logout', requireUser, (req, res, next) => {
   req.session.destroy((error) => {
     if (error) return next(error);
@@ -400,15 +553,15 @@ app.get('/api/data', requireUser, (req, res, next) => {
 
 app.put('/api/data', requireUser, (req, res, next) => {
   try {
-    if (!validateTrackerData(req.body)) {
-      return res.status(400).json({ error: 'Данните са невалидни. Провери измерванията и опитай отново.' });
-    }
     const user = db.prepare('SELECT profile_key FROM users WHERE id = ?').get(req.session.userId);
     if (!user || !user.profile_key) {
       return res.status(409).json({ error: 'Преди запис трябва да зададеш име за своя таб.' });
     }
     const row = db.prepare('SELECT data FROM competition_data WHERE id = 1').get();
     const sharedData = row ? JSON.parse(row.data) : emptyTrackerData();
+    if (!validateTrackerData(req.body, sharedData.profiles)) {
+      return res.status(400).json({ error: 'Данните са невалидни. Провери измерванията и опитай отново.' });
+    }
     sharedData.profiles[user.profile_key] = req.body.profiles[user.profile_key];
     sharedData.activeProfile = user.profile_key;
     db.prepare(`

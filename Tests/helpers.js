@@ -19,7 +19,7 @@ async function freePort() {
   return port;
 }
 
-async function startTestServer({ seed } = {}) {
+async function startTestServer({ seed, env: extraEnv } = {}) {
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'kiloscalendai-tests-'));
   const databasePath = path.join(temporaryDirectory, 'tracker.sqlite');
   const port = await freePort();
@@ -40,7 +40,8 @@ async function startTestServer({ seed } = {}) {
       SESSION_SECRET: 'automated-test-session-secret-with-more-than-32-characters',
       DATABASE_PATH: databasePath,
       HOST: '127.0.0.1',
-      PORT: String(port)
+      PORT: String(port),
+      ...(extraEnv || {})
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -70,6 +71,7 @@ async function startTestServer({ seed } = {}) {
   return {
     baseUrl,
     databasePath,
+    output: () => output,
     async stop() {
       if (child.exitCode === null) {
         const exited = once(child, 'exit');
